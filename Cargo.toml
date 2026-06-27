@@ -4,3 +4,31 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cortex-m = "0.7.7"
+cortex-m-rt = "0.7.5"
+
+defmt = "1.0.0"
+defmt-rtt = "1.0.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+
+embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "defmt"] }
+embassy-futures = "0.1.2"
+embassy-time = "0.5.0"
+embassy-rp = { version = "0.8.0", features = ["time-driver", "critical-section-impl", "rp235xa", "defmt"] }
+
+# For the screen
+mipidsi = "0.8"
+embedded-graphics = "0.8"
+display-interface-spi = "0.5"
+embedded-hal-bus = "0.2"
+
+# embassy-sync = "0.7.2"
+
+[profile.dev]
+codegen-units = 1
+
+[profile.release]
+opt-level = "s"
+lto = true
+codgen-units = 1
+strip = true
