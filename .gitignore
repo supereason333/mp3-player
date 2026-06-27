@@ -1,0 +1,27 @@
+# Rust / Cargo
+target/
+
+# Embedded build artifacts
+*.elf
+*.bin
+*.hex
+*.uf2
+*.map
+
+# Debug / probe output
+*.log
+probe-rs-log/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment / secrets
+.env
