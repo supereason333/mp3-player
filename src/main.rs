@@ -26,7 +26,6 @@ use embedded_graphics::{
     mono_font::ascii::FONT_10X20,
     pixelcolor::Rgb565,
     prelude::*,
-    primitives::{Circle, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle},
     text::Text,
 };
 

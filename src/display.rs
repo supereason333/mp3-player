@@ -1,10 +1,8 @@
 use display_interface_spi::SPIInterface;
 use embassy_rp::gpio::Output;
-use embassy_rp::peripherals::{PIN_7, PIN_9, PIN_10, PIN_11, PIN_13, SPI1};
+use embassy_rp::peripherals::SPI1;
 use embassy_rp::spi::{Blocking, Spi};
-use embedded_graphics::pixelcolor::Rgb565;
 use embedded_hal_bus::spi::ExclusiveDevice;
-use mipidsi::options::ColorInversion;
 use mipidsi::{Builder, Display, models::ST7735s};
 
 // Type alias so you never have to write this again
