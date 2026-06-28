@@ -6,7 +6,7 @@ const REG_CALIB: u8 = 0x88;
 
 pub struct BMP280 {
     bus: I2c<'static, I2C0, Async>,
-    address: u16,
+    address: u8,
     dig_t1: u16,
     dig_t2: i16,
     dig_t3: i16,
@@ -14,7 +14,7 @@ pub struct BMP280 {
 
 impl BMP280 {
     /// Initilize new and read calibration
-    pub async fn new(mut bus: I2c<'static, I2C0, Async>, addr: u16) -> Self {
+    pub async fn new(mut bus: I2c<'static, I2C0, Async>, addr: u8) -> Self {
         let mut buf = [0u8; 6];
         bus.write_read_async(addr, REG_CALIB.to_be_bytes(), &mut buf)
             .await
