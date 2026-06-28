@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+mod bmp820;
+
 use defmt::*;
 use defmt_rtt as _;
 use panic_probe as _;
