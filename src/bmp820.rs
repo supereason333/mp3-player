@@ -3,6 +3,7 @@ use embassy_rp::peripherals::I2C0;
 
 const REG_TEMP: u8 = 0xFA;
 const REG_CALIB: u8 = 0x88;
+const REG_CTRL_MEAS: u8 = 0xF4;
 
 pub struct BMP280 {
     bus: I2c<'static, I2C0, Async>,
@@ -20,6 +21,11 @@ impl BMP280 {
             .await
             .unwrap();
 
+        // osrs_t=001 (x1), osrs_p=001 (x1), mode=11 (normal)
+        bus.write_async(addr, [REG_CTRL_MEAS, 0b001_001_11])
+            .await
+            .unwrap();
+
         Self {
             bus: bus,
             address: addr,
@@ -34,7 +40,6 @@ impl BMP280 {
             .write_read_async(self.address, REG_TEMP.to_be_bytes(), &mut buf)
             .await
             .unwrap();
-
         let adc_t =
             (((buf[0] as u32) << 12) | ((buf[1] as u32) << 4) | ((buf[2] as u32) >> 4)) as i32;
         let var1 = (((adc_t >> 3) - ((self.dig_t1 as i32) << 1)) * self.dig_t2 as i32) >> 11;

@@ -1,27 +1,97 @@
-use display_interface_spi::SPIInterface;
 use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::SPI1;
-use embassy_rp::spi::{Blocking, Spi};
-use embedded_hal_bus::spi::ExclusiveDevice;
-use mipidsi::{Builder, Display, models::ST7735s};
+use embassy_rp::spi::{Async, Spi};
+use embassy_time::Timer;
 
-// Type alias so you never have to write this again
-type DisplaySpi =
-    ExclusiveDevice<Spi<'static, SPI1, Blocking>, Output<'static>, embedded_hal_bus::spi::NoDelay>;
-type DisplayDi = SPIInterface<DisplaySpi, Output<'static>>;
-pub type ST7735Display = Display<DisplayDi, ST7735s, Output<'static>>;
+use embedded_graphics::framebuffer::{Framebuffer, buffer_size};
+use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::pixelcolor::raw::{LittleEndian, RawU16};
 
-pub fn build_display(
-    spi: Spi<'static, SPI1, Blocking>,
-    cs: Output<'static>,
-    dcx: Output<'static>,
+pub struct Display {
+    spi: Spi<'static, SPI1, Async>,
+    dc: Output<'static>,
     rst: Output<'static>,
-) -> ST7735Display {
-    let spi_dev = ExclusiveDevice::new_no_delay(spi, cs).unwrap();
-    let di = SPIInterface::new(spi_dev, dcx);
-    Builder::new(ST7735s, di)
-        .display_size(128, 160)
-        .reset_pin(rst)
-        .init(&mut embassy_time::Delay)
-        .unwrap()
+    cs: Output<'static>,
+}
+
+impl Display {
+    // Gives a new display struct
+    pub async fn new(
+        spi: Spi<'static, SPI1, Async>,
+        dc: Output<'static>,
+        rst: Output<'static>,
+        cs: Output<'static>,
+    ) -> Self {
+        Self {
+            spi: spi,
+            dc: dc,
+            rst: rst,
+            cs: cs,
+        }
+    }
+    // Initilize the display
+    pub async fn init_display(&mut self) {
+        self.cs.set_low();
+        // Hardware reset
+        self.rst.set_low();
+        Timer::after_millis(10).await;
+        self.rst.set_high();
+        Timer::after_millis(120).await;
+
+        self.write_command(0x01, &[]).await; // SWRESET software reset
+        Timer::after_millis(150).await;
+
+        self.write_command(0x11, &[]).await; // SLPOUT sleep out
+        Timer::after_millis(120).await;
+
+        self.write_command(0x3A, &[0x05]).await; // COLMOD 16bit color RGB565
+        self.write_command(0x36, &[0x00]).await; // MADCTL memory access control
+        self.write_command(0x29, &[]).await; // DISPON display on
+        Timer::after_millis(10).await;
+    }
+    // Write a command to the display
+    pub async fn write_command(&mut self, cmd: u8, args: &[u8]) {
+        self.dc.set_low();
+        self.spi.write(&[cmd]).await.unwrap();
+        if !args.is_empty() {
+            self.dc.set_high();
+            self.spi.write(args).await.unwrap();
+        }
+    }
+    pub async fn write_framebuf(
+        &mut self,
+        fb: Framebuffer<
+            Rgb565,
+            RawU16,
+            LittleEndian,
+            128,
+            160,
+            { buffer_size::<Rgb565>(128, 160) },
+        >,
+    ) {
+        // Column address set (CASET) — x0=0, x1=127
+        self.write_command(0x2A, &[0x00, 0x00, 0x00, 0x7F]).await;
+
+        // Row address set (RASET) — y0=0, y1=159
+        self.write_command(0x2B, &[0x00, 0x00, 0x00, 0x9F]).await;
+
+        // Memory write (RAMWR) — followed by raw pixel data
+        self.dc.set_low();
+        self.spi.write(&[0x2C]).await.unwrap();
+
+        // Blast entire framebuffer in one transfer
+        self.dc.set_high();
+        self.spi.write(fb.data()).await.unwrap();
+    }
+    pub async fn clear(&mut self) {
+        let fb: Framebuffer<
+            Rgb565,
+            RawU16,
+            LittleEndian,
+            128,
+            160,
+            { buffer_size::<Rgb565>(128, 160) },
+        > = Framebuffer::new();
+        self.write_framebuf(fb).await;
+    }
 }

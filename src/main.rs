@@ -13,6 +13,8 @@ use heapless::String;
 
 use embassy_executor::Spawner;
 
+use embassy_time::Instant;
+
 // HAL Imports
 use embassy_rp::gpio;
 use embassy_rp::gpio::Level;
@@ -21,22 +23,21 @@ use embassy_rp::i2c::InterruptHandler;
 use embassy_rp::peripherals::I2C0;
 use embassy_rp::spi;
 
+use embedded_graphics::framebuffer::{Framebuffer, buffer_size};
+use embedded_graphics::pixelcolor::raw::{LittleEndian, RawU16};
 use embedded_graphics::{
-    mono_font::MonoTextStyle,
-    mono_font::ascii::FONT_10X20,
-    pixelcolor::Rgb565,
-    prelude::*,
+    mono_font::MonoTextStyle, mono_font::ascii::FONT_10X20, pixelcolor::Rgb565, prelude::*,
     text::Text,
 };
 
 use crate::bmp820::BMP280;
-use crate::display::build_display;
+use crate::display::Display;
 
 embassy_rp::bind_interrupts!(struct Irqs {
     I2C0_IRQ => InterruptHandler<embassy_rp::peripherals::I2C0>;
 });
 
-const DISPLAY_FREQ: u32 = 64_000_000;
+const DISPLAY_FREQ: u32 = 32_000_000;
 
 const BMP280_ADDR: u8 = 0x76;
 
@@ -55,7 +56,7 @@ async fn main(_spawner: Spawner) {
     let mut bmp_280 = BMP280::new(bus, BMP280_ADDR).await;
 
     // Build and take ownership of display
-    let cs = Output::new(p.PIN_13, Level::High);
+    let cs = Output::new(p.PIN_13, Level::Low);
     let dcx = Output::new(p.PIN_7, Level::High);
     let rst = Output::new(p.PIN_9, Level::High);
     let mosi = p.PIN_11;
@@ -65,27 +66,44 @@ async fn main(_spawner: Spawner) {
     display_config.phase = spi::Phase::CaptureOnFirstTransition;
     display_config.polarity = spi::Polarity::IdleLow;
 
-    let spi = embassy_rp::spi::Spi::new_blocking_txonly(p.SPI1, clk, mosi, display_config);
-    let mut display: display::ST7735Display = build_display(spi, cs, dcx, rst);
-    display.clear(Rgb565::BLACK).unwrap();
+    let spi = embassy_rp::spi::Spi::new_txonly(p.SPI1, clk, mosi, p.DMA_CH0, display_config);
+    let mut display = Display::new(spi, dcx, rst, cs).await;
+    display.init_display().await;
 
     // button
     let mut btn = gpio::Input::new(p.PIN_15, gpio::Pull::Up);
 
     loop {
-        btn.wait_for_low().await;
-        info!("Button pressed");
+        // btn.wait_for_low().await;
+        let start = Instant::now();
+
+        // info!("Button pressed");
         let temp = bmp_280.read_temp().await;
+        // info!("Temp: {}", temp);
         let int_part = temp as i32;
         let frac_part = ((temp - int_part as f32) * 100.0) as u32;
         let mut text: String<32> = String::new();
         core::write!(text, "Temp:\n{}.{:02}", int_part, frac_part).unwrap();
 
-        display.clear(Rgb565::BLACK).unwrap();
         let style = MonoTextStyle::new(&FONT_10X20, Rgb565::GREEN);
 
-        Text::new(&text, Point::new(20, 20), style)
-            .draw(&mut display)
+        let mut fb: Framebuffer<
+            Rgb565,
+            RawU16,
+            LittleEndian,
+            128,
+            160,
+            { buffer_size::<Rgb565>(128, 160) },
+        > = Framebuffer::new();
+
+        // Draw everything to RAM — instant, no SPI
+        Text::new(&text, Point::new(10, 20), style)
+            .draw(&mut fb)
             .unwrap();
+
+        display.write_framebuf(fb).await;
+
+        info!("Frame: {}ms", &start.elapsed().as_millis());
+        // btn.wait_for_high().await;
     }
 }
