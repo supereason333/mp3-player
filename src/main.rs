@@ -24,7 +24,8 @@ use embassy_rp::peripherals::I2C0;
 use embassy_rp::spi;
 
 use embedded_graphics::framebuffer::{Framebuffer, buffer_size};
-use embedded_graphics::pixelcolor::raw::{LittleEndian, RawU16};
+use embedded_graphics::pixelcolor::raw::{BigEndian, RawU16};
+use embedded_graphics::primitives::{PrimitiveStyleBuilder, Rectangle};
 use embedded_graphics::{
     mono_font::MonoTextStyle, mono_font::ascii::FONT_10X20, pixelcolor::Rgb565, prelude::*,
     text::Text,
@@ -74,7 +75,7 @@ async fn main(_spawner: Spawner) {
     let mut btn = gpio::Input::new(p.PIN_15, gpio::Pull::Up);
 
     loop {
-        // btn.wait_for_low().await;
+        btn.wait_for_low().await;
         let start = Instant::now();
 
         // info!("Button pressed");
@@ -85,18 +86,29 @@ async fn main(_spawner: Spawner) {
         let mut text: String<32> = String::new();
         core::write!(text, "Temp:\n{}.{:02}", int_part, frac_part).unwrap();
 
-        let style = MonoTextStyle::new(&FONT_10X20, Rgb565::GREEN);
-
         let mut fb: Framebuffer<
             Rgb565,
             RawU16,
-            LittleEndian,
+            BigEndian,
             128,
             160,
             { buffer_size::<Rgb565>(128, 160) },
         > = Framebuffer::new();
+        // fb.clear(Rgb565::BLACK).unwrap();
+        fb.data_mut().fill(0x00);
 
-        // Draw everything to RAM — instant, no SPI
+        // let style = PrimitiveStyleBuilder::new()
+        //     .stroke_color(Rgb565::CSS_DARK_SLATE_GRAY)
+        //     .stroke_width(3)
+        //     .fill_color(Rgb565::CSS_DARK_GRAY)
+        //     .build();
+
+        // Rectangle::new(Point::new(1, 1), Size::new(126, 158))
+        //     .into_styled(style)
+        //     .draw(&mut fb)
+        //     .unwrap();
+
+        let style = MonoTextStyle::new(&FONT_10X20, Rgb565::GREEN);
         Text::new(&text, Point::new(10, 20), style)
             .draw(&mut fb)
             .unwrap();
@@ -104,6 +116,6 @@ async fn main(_spawner: Spawner) {
         display.write_framebuf(fb).await;
 
         info!("Frame: {}ms", &start.elapsed().as_millis());
-        // btn.wait_for_high().await;
+        btn.wait_for_high().await;
     }
 }
