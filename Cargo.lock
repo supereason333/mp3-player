@@ -338,7 +338,7 @@ checksum = "554e3e840696f54b4c9afcf28a0f24da431c927f4151040020416e7393d6d0d8"
 dependencies = [
  "embassy-futures",
  "embassy-hal-internal",
- "embassy-sync",
+ "embassy-sync 0.7.2",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -413,7 +413,7 @@ dependencies = [
  "embassy-embedded-hal",
  "embassy-futures",
  "embassy-hal-internal",
- "embassy-sync",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "embassy-time-driver",
  "embassy-time-queue-utils",
@@ -449,6 +449,20 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "heapless 0.8.0",
+]
+
+[[package]]
+name = "embassy-sync"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bbd85cf5a5ae56bdf26f618364af642d1d0a4e245cdd75cd9aabda382f65a81"
+dependencies = [
+ "cfg-if",
+ "critical-section",
+ "embedded-io-async 0.7.0",
+ "futures-core",
+ "futures-sink",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -594,6 +608,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0"
 dependencies = [
  "embedded-io 0.7.1",
+]
+
+[[package]]
+name = "embedded-sdmmc"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce3c7f9ea039eeafc4a49597b7bd5ae3a1c8e51b2803a381cb0f29ce90fe1ec6"
+dependencies = [
+ "byteorder",
+ "embedded-hal 1.0.0",
+ "embedded-io 0.6.1",
+ "heapless 0.8.0",
+ "log",
 ]
 
 [[package]]
@@ -844,9 +871,11 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-rp",
+ "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-graphics",
  "embedded-hal-bus",
+ "embedded-sdmmc",
  "heapless 0.9.3",
  "panic-probe",
 ]

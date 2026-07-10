@@ -22,6 +22,10 @@ display-interface-spi = "0.5"
 embedded-hal-bus = "0.2"
 heapless = "0.9.3"
 
+# SD card
+embedded-sdmmc = "0.9.0"
+embassy-sync = "0.8.0"
+
 # embassy-sync = "0.7.2"
 
 [profile.dev]
