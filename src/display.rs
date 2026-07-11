@@ -7,6 +7,8 @@ use embedded_graphics::framebuffer::{Framebuffer, buffer_size};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::pixelcolor::raw::{BigEndian, RawU16};
 
+use crate::input::{NAV_EVENT, NavEvent};
+
 pub struct Display {
     spi: Spi<'static, SPI1, Async>,
     dc: Output<'static>,
@@ -89,5 +91,20 @@ impl Display {
             { buffer_size::<Rgb565>(128, 160) },
         > = Framebuffer::new();
         self.write_framebuf(fb).await;
+    }
+}
+
+#[embassy_executor::task]
+pub async fn display_task(display: Display) {
+    let mut selected_index: usize = 0;
+
+    loop {
+        let event = NAV_EVENT.wait().await;
+
+        match event {
+            NavEvent::Up => {}
+            NavEvent::Down => {}
+            NavEvent::Select => {}
+        }
     }
 }
