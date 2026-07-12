@@ -1,3 +1,5 @@
+// Wrapper for the display to easily write framebuffers and setup
+
 use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::SPI1;
 use embassy_rp::spi::{Async, Spi};
@@ -7,7 +9,8 @@ use embedded_graphics::framebuffer::{Framebuffer, buffer_size};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::pixelcolor::raw::{BigEndian, RawU16};
 
-use crate::input::{NAV_EVENT, NavEvent};
+pub type FbType =
+    Framebuffer<Rgb565, RawU16, BigEndian, 128, 160, { buffer_size::<Rgb565>(128, 160) }>;
 
 pub struct Display {
     spi: Spi<'static, SPI1, Async>,
@@ -65,7 +68,7 @@ impl Display {
     }
     pub async fn write_framebuf(
         &mut self,
-        fb: Framebuffer<Rgb565, RawU16, BigEndian, 128, 160, { buffer_size::<Rgb565>(128, 160) }>,
+        fb: &Framebuffer<Rgb565, RawU16, BigEndian, 128, 160, { buffer_size::<Rgb565>(128, 160) }>,
     ) {
         // Column address set (CASET) — x0=0, x1=127
         self.write_command(0x2A, &[0x00, 0x00, 0x00, 0x7F]).await;
@@ -80,31 +83,5 @@ impl Display {
         // Blast entire framebuffer in one transfer
         self.dc.set_high();
         self.spi.write(fb.data()).await.unwrap();
-    }
-    pub async fn clear(&mut self) {
-        let fb: Framebuffer<
-            Rgb565,
-            RawU16,
-            BigEndian,
-            128,
-            160,
-            { buffer_size::<Rgb565>(128, 160) },
-        > = Framebuffer::new();
-        self.write_framebuf(fb).await;
-    }
-}
-
-#[embassy_executor::task]
-pub async fn display_task(display: Display) {
-    let mut selected_index: usize = 0;
-
-    loop {
-        let event = NAV_EVENT.wait().await;
-
-        match event {
-            NavEvent::Up => {}
-            NavEvent::Down => {}
-            NavEvent::Select => {}
-        }
     }
 }

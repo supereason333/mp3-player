@@ -1,3 +1,6 @@
+use defmt::*;
+use defmt_rtt as _;
+
 use embassy_rp::gpio::Input;
 
 use embassy_futures::select::Either3;
@@ -31,6 +34,8 @@ pub async fn input_task(
     mut btn_down: Input<'static>,
     mut btn_select: Input<'static>,
 ) {
+    info!("[Input] Input task spawned");
+
     loop {
         match select3(
             debounced_press(&mut btn_up),

@@ -22,8 +22,8 @@ pub enum SdRequest {
     ListDir(HVec<u8, 64>), // path, or empty for root — encode however fits your dir stack
 }
 
-static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new();
-static SD_RESPONSE: Signal<CriticalSectionRawMutex, DirListing> = Signal::new();
+pub static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new();
+pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, DirListing> = Signal::new();
 
 pub type DirListing = HVec<(ShortFileName, u32, bool), 32>;
 
@@ -51,20 +51,22 @@ impl TimeSource for DummyTimesource {
 pub async fn sd_task(
     spi_device: ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>,
 ) -> ! {
+    info!("[SD] SD task spawned");
+
     let sdcard = SdCard::new(spi_device, Delay);
 
-    info!("Init SD card controller and retrieve card size...");
+    info!("[SD] Init SD card controller and retrieve card size...");
     let sd_size = sdcard.num_bytes().expect("failed to get sdcard size");
-    info!("card size is {} bytes", sd_size);
+    info!("[SD] card size is {} bytes", sd_size);
 
     let volume_mgr = VolumeManager::new(sdcard, DummyTimesource::default());
     let volume0 = volume_mgr
         .open_volume(VolumeIdx(0))
-        .expect("failed to open volume");
-    let mut root = match volume0.open_root_dir() {
+        .expect("[SD] failed to open volume");
+    let root = match volume0.open_root_dir() {
         Ok(dir) => dir,
         Err(e) => {
-            defmt::panic!("open_root_dir failed: {:?}", Debug2Format(&e));
+            defmt::panic!("[SD] open_root_dir failed: {:?}", Debug2Format(&e));
         }
     };
 
