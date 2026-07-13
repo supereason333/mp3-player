@@ -78,6 +78,20 @@ pub async fn sd_task(
 
                 let result = (|| -> Result<(), embedded_sdmmc::Error<embassy_rp::spi::Error>> {
                     match root.iterate_dir(|entry| {
+                        // Filter out unwanted stuff
+                        if entry.attributes.is_system() {
+                            return;
+                        }
+                        if entry.attributes.is_volume() {
+                            return;
+                        }
+                        if entry.attributes.is_hidden() {
+                            return;
+                        }
+                        if entry.name.base_name()[0] == b'_' {
+                            return;
+                        }
+
                         let _ = entries.push((
                             entry.name.clone(),
                             entry.size,

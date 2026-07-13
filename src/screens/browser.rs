@@ -61,7 +61,7 @@ impl ScreenLogic for BrowserScreen {
     }
 
     fn draw(&self, fb: &mut FbType) {
-        for (i, (name, _size, _is_dir)) in self.entries.iter().enumerate() {
+        for (i, (name, _size, is_dir)) in self.entries.iter().enumerate() {
             let style;
             if i == self.selected_index {
                 style = MonoTextStyle::new(&FONT_4X6, Rgb565::GREEN);
@@ -70,13 +70,19 @@ impl ScreenLogic for BrowserScreen {
             }
 
             let mut buf: String<16> = String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
-            let _ = core::write!(buf, "{}", name);
+            if is_dir.clone() {
+                let _ = core::write!(buf, "{}/", name);
+            } else {
+                let _ = core::write!(buf, "{}", name);
+            }
             // buf is heapless::String<16>, which derefs to &str:
             let name: &str = &buf;
 
             Text::new(name, Point::new(0, 8 * i as i32 + 6), style)
                 .draw(fb)
                 .unwrap();
+
+            info!("File {}", name);
 
             // let style = PrimitiveStyleBuilder::new()
             //     .stroke_color(Rgb565::CSS_DARK_SLATE_GRAY)
