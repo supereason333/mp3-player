@@ -20,12 +20,36 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 
 use embassy_time::Delay;
 
+// Simple requests
 pub enum SdRequest {
-    ListDir(DirPath), // path, or empty for root — encode however fits your dir stack
+    ListDir(DirPath),
+    ReadFile(DirPath, ShortFileName), // whole-file read, capped size, for text/hex viewers
+}
+
+pub enum SdResponse {
+    DirListing(DirListing),
+    FileContents(HVec<u8, 512>),
 }
 
 pub static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new();
-pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, DirListing> = Signal::new();
+pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::new();
+
+// ---- Audio-facing (streaming playback) ----
+// pub enum AudioSdRequest {
+//     Open(DirPath, ShortFileName),
+//     ReadChunk, // "give me the next chunk of the currently open file"
+//     Close,
+// }
+
+// pub enum AudioSdResponse {
+//     Opened { size: u32 },
+//     Chunk(HVec<u8, 512>),
+//     Eof,
+//     Error,
+// }
+
+// pub static AUDIO_SD_REQUEST: Channel<CriticalSectionRawMutex, AudioSdRequest, 2> = Channel::new();
+// pub static AUDIO_SD_RESPONSE: Signal<CriticalSectionRawMutex, AudioSdResponse> = Signal::new();
 
 pub type DirListing = HVec<(ShortFileName, u32, bool), 32>;
 pub type DirPath = HVec<ShortFileName, 16>;
@@ -83,8 +107,57 @@ pub async fn sd_task(
                     error!("SD list error: {:?}", Debug2Format(&e));
                 }
 
-                SD_RESPONSE.signal(entries);
+                SD_RESPONSE.signal(SdResponse::DirListing(entries));
             }
+            SdRequest::ReadFile(path, name) => {
+                let mut buf: HVec<u8, 512> = HVec::new();
+
+                let result = (|| -> Result<(), SdError> {
+                    let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
+                    let root = volume0.open_root_dir()?;
+
+                    let r = with_dir_at_path(&root, &path, |target_dir| {
+                        let file = target_dir
+                            .open_file_in_dir(name.clone(), embedded_sdmmc::Mode::ReadOnly)?;
+                        buf.resize_default(512).ok();
+                        let bytes_read = file.read(&mut buf)?;
+                        buf.truncate(bytes_read);
+                        file.close()?;
+                        Ok(())
+                    });
+
+                    root.close()?;
+                    volume0.close()?;
+                    r
+                })();
+
+                if let Err(e) = result {
+                    error!("[SD] ReadFile failed: {:?}", Debug2Format(&e));
+                }
+
+                SD_RESPONSE.signal(SdResponse::FileContents(buf));
+            }
+        }
+    }
+}
+
+fn with_dir_at_path<D, T, const DIRS: usize, const FILES: usize, const VOLS: usize, F, R>(
+    dir: &Directory<D, T, DIRS, FILES, VOLS>,
+    path: &[ShortFileName],
+    f: F,
+) -> Result<R, embedded_sdmmc::Error<D::Error>>
+where
+    D: embedded_sdmmc::BlockDevice,
+    T: embedded_sdmmc::TimeSource,
+    F: FnOnce(&Directory<D, T, DIRS, FILES, VOLS>) -> Result<R, embedded_sdmmc::Error<D::Error>>,
+{
+    match path.split_first() {
+        None => f(dir), // reached target — run the caller's logic here
+        Some((first, rest)) => {
+            let child = dir.open_dir(first)?;
+            let result = with_dir_at_path(&child, rest, f);
+            child.close()?;
+            result
         }
     }
 }
@@ -98,35 +171,20 @@ where
     D: embedded_sdmmc::BlockDevice,
     T: embedded_sdmmc::TimeSource,
 {
-    match path.split_first() {
-        None => {
-            // reached the target directory — list it
-            // First filter out unwanted system and MacOS system files
-            dir.iterate_dir(|entry| {
-                if entry.attributes.is_system()
-                    || entry.attributes.is_volume()
-                    || entry.name.base_name()[0] == b'_'
-                {
-                    return;
-                }
-                if entry.name.base_name().len() == 1 {
-                    if entry.name.base_name()[0] == b'.' {
-                        return;
-                    }
-                }
-                let _ = entries.push((
-                    entry.name.clone(),
-                    entry.size,
-                    entry.attributes.is_directory(),
-                ));
-            })?;
-            Ok(())
-        }
-        Some((first, rest)) => {
-            let child = dir.open_dir(first)?;
-            let result = list_dir_recursive(&child, rest, entries);
-            child.close()?;
-            result
-        }
-    }
+    with_dir_at_path(dir, path, |target_dir| {
+        target_dir.iterate_dir(|entry| {
+            if entry.attributes.is_system()
+                || entry.attributes.is_volume()
+                || entry.name.base_name()[0] == b'_'
+                || (entry.name.base_name().len() == 1 && entry.name.base_name()[0] == b'.')
+            {
+                return;
+            }
+            let _ = entries.push((
+                entry.name.clone(),
+                entry.size,
+                entry.attributes.is_directory(),
+            ));
+        })
+    })
 }

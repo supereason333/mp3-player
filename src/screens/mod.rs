@@ -1,10 +1,14 @@
 // screens/mod.rs
 pub mod browser;
+pub mod cat;
 pub mod settings;
+
+use embedded_sdmmc::ShortFileName;
 
 use crate::{
     display::FbType,
     input::{NAV_EVENT, NavEvent},
+    sd::DirPath,
 };
 
 pub enum Transition {
@@ -23,9 +27,17 @@ pub trait ScreenLogic {
     async fn on_enter(&mut self) {}
 }
 
+pub trait FileOpenerScreen {
+    /// Used to see what path this was opened from, so browser
+    /// can be rebuilt correctly
+    fn return_path(&self) -> &DirPath;
+    fn filename(&self) -> &ShortFileName;
+}
+
 pub enum Screen {
     Browser(browser::BrowserScreen),
     Settings(settings::SettingsScreen),
+    Cat(cat::CatScreen),
 }
 
 impl Screen {
@@ -33,6 +45,7 @@ impl Screen {
         match self {
             Screen::Browser(s) => s.on_event(event).await,
             Screen::Settings(s) => s.on_event(event).await,
+            Screen::Cat(s) => s.on_event(event).await,
         }
     }
 
@@ -40,6 +53,7 @@ impl Screen {
         match self {
             Screen::Browser(s) => s.draw(fb),
             Screen::Settings(s) => s.draw(fb),
+            Screen::Cat(s) => s.draw(fb),
         }
     }
 
@@ -47,6 +61,7 @@ impl Screen {
         match self {
             Screen::Browser(s) => s.on_enter().await,
             Screen::Settings(s) => s.on_enter().await,
+            Screen::Cat(s) => s.on_enter().await,
         }
     }
 }

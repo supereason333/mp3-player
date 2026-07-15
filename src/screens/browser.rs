@@ -14,8 +14,9 @@ use embedded_graphics::{
 
 use crate::display::FbType;
 use crate::input::{NAV_EVENT, NavEvent};
-use crate::screens::{ScreenLogic, Transition};
-use crate::sd::{DirListing, DirPath, SD_REQUEST, SD_RESPONSE, SdRequest};
+use crate::screens::cat::CatScreen;
+use crate::screens::{Screen, ScreenLogic, Transition};
+use crate::sd::{DirListing, DirPath, SD_REQUEST, SD_RESPONSE, SdRequest, SdResponse};
 
 pub struct BrowserScreen {
     entries: DirListing,
@@ -31,13 +32,26 @@ impl BrowserScreen {
             path: HVec::new(),
         }
     }
+    pub fn new_with_path(path: DirPath) -> Self {
+        Self {
+            entries: HVec::new(),
+            selected_index: 0,
+            path: path,
+        }
+    }
 }
 
 impl ScreenLogic for BrowserScreen {
     async fn on_enter(&mut self) {
         info!("[Browser] Send SdRequest");
         SD_REQUEST.send(SdRequest::ListDir(self.path.clone())).await;
-        self.entries = SD_RESPONSE.wait().await;
+        self.entries = match SD_RESPONSE.wait().await {
+            SdResponse::DirListing(entries) => entries,
+            SdResponse::FileContents(_) => {
+                error!("[Browser] Got FileContents when expecting DirListing");
+                HVec::new() // degrade to empty listing rather than crashing
+            }
+        };
         info!("[Browser] Recieved Sd Response");
         self.selected_index = 0;
     }
@@ -79,11 +93,24 @@ impl ScreenLogic for BrowserScreen {
                     }
                     info!("[Browser] Send SdRequest");
                     SD_REQUEST.send(SdRequest::ListDir(self.path.clone())).await;
-                    self.entries = SD_RESPONSE.wait().await;
+                    self.entries = match SD_RESPONSE.wait().await {
+                        SdResponse::DirListing(entries) => entries,
+                        SdResponse::FileContents(_) => {
+                            error!("[Browser] Got FileContents when expecting DirListing");
+                            HVec::new() // degrade to empty listing rather than crashing
+                        }
+                    };
                     info!("[Browser] Recieved Sd Response");
                     self.selected_index = 0;
                 } else {
                     // Open normal file
+                    let ext = entry.0.extension();
+                    return match ext {
+                        b"TXT" | b"BIN" | b"PLI" | b"LOG" | b"CFG" | b"RS" => Transition::GoTo(
+                            Screen::Cat(CatScreen::new(self.path.clone(), entry.0.clone())),
+                        ),
+                        _ => Transition::Stay,
+                    };
                 }
             }
         }
