@@ -7,7 +7,9 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
 
-use embedded_sdmmc::{SdCard, ShortFileName, TimeSource, Timestamp, VolumeIdx, VolumeManager};
+use embedded_sdmmc::{
+    Directory, SdCard, ShortFileName, TimeSource, Timestamp, VolumeIdx, VolumeManager,
+};
 
 use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::SPI0;
@@ -19,13 +21,17 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use embassy_time::Delay;
 
 pub enum SdRequest {
-    ListDir(HVec<u8, 64>), // path, or empty for root — encode however fits your dir stack
+    ListDir(DirPath), // path, or empty for root — encode however fits your dir stack
 }
 
 pub static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new();
 pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, DirListing> = Signal::new();
 
 pub type DirListing = HVec<(ShortFileName, u32, bool), 32>;
+pub type DirPath = HVec<ShortFileName, 16>;
+type SdBlockDevice =
+    SdCard<ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>, Delay>;
+type SdError = embedded_sdmmc::Error<<SdBlockDevice as embedded_sdmmc::BlockDevice>::Error>;
 
 /// Code from https://github.com/rp-rs/rp-hal-boards/blob/main/boards/rp-pico/examples/pico_spi_sd_card.rs
 /// A dummy timesource, which is mostly important for creating files.
@@ -52,59 +58,25 @@ pub async fn sd_task(
     spi_device: ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>,
 ) -> ! {
     info!("[SD] SD task spawned");
-
     let sdcard = SdCard::new(spi_device, Delay);
-
-    info!("[SD] Init SD card controller and retrieve card size...");
     let sd_size = sdcard.num_bytes().expect("failed to get sdcard size");
     info!("[SD] card size is {} bytes", sd_size);
 
     let volume_mgr = VolumeManager::new(sdcard, DummyTimesource::default());
-    let volume0 = volume_mgr
-        .open_volume(VolumeIdx(0))
-        .expect("[SD] failed to open volume");
-    let root = match volume0.open_root_dir() {
-        Ok(dir) => dir,
-        Err(e) => {
-            defmt::panic!("[SD] open_root_dir failed: {:?}", Debug2Format(&e));
-        }
-    };
 
     loop {
         let request = SD_REQUEST.receive().await;
         match request {
-            SdRequest::ListDir(_path) => {
+            SdRequest::ListDir(path) => {
                 let mut entries: DirListing = HVec::new();
 
-                let result = (|| -> Result<(), embedded_sdmmc::Error<embassy_rp::spi::Error>> {
-                    match root.iterate_dir(|entry| {
-                        // Filter out unwanted stuff
-                        if entry.attributes.is_system() {
-                            return;
-                        }
-                        if entry.attributes.is_volume() {
-                            return;
-                        }
-                        if entry.attributes.is_hidden() {
-                            return;
-                        }
-                        if entry.name.base_name()[0] == b'_' {
-                            return;
-                        }
-
-                        let _ = entries.push((
-                            entry.name.clone(),
-                            entry.size,
-                            entry.attributes.is_directory(),
-                        ));
-                    }) {
-                        Ok(()) => {}
-                        Err(e) => {
-                            defmt::panic!("root dir iterate dir error: {:?}", Debug2Format(&e))
-                        }
-                    }
-
-                    Ok(())
+                let result = (|| -> Result<(), SdError> {
+                    let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
+                    let root = volume0.open_root_dir()?;
+                    let result = list_dir_recursive(&root, &path, &mut entries);
+                    root.close()?;
+                    volume0.close()?;
+                    result
                 })();
 
                 if let Err(e) = result {
@@ -113,6 +85,48 @@ pub async fn sd_task(
 
                 SD_RESPONSE.signal(entries);
             }
+        }
+    }
+}
+
+fn list_dir_recursive<D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
+    dir: &Directory<D, T, DIRS, FILES, VOLS>,
+    path: &[ShortFileName],
+    entries: &mut DirListing,
+) -> Result<(), embedded_sdmmc::Error<D::Error>>
+where
+    D: embedded_sdmmc::BlockDevice,
+    T: embedded_sdmmc::TimeSource,
+{
+    match path.split_first() {
+        None => {
+            // reached the target directory — list it
+            // First filter out unwanted system and MacOS system files
+            dir.iterate_dir(|entry| {
+                if entry.attributes.is_system()
+                    || entry.attributes.is_volume()
+                    || entry.name.base_name()[0] == b'_'
+                {
+                    return;
+                }
+                if entry.name.base_name().len() == 1 {
+                    if entry.name.base_name()[0] == b'.' {
+                        return;
+                    }
+                }
+                let _ = entries.push((
+                    entry.name.clone(),
+                    entry.size,
+                    entry.attributes.is_directory(),
+                ));
+            })?;
+            Ok(())
+        }
+        Some((first, rest)) => {
+            let child = dir.open_dir(first)?;
+            let result = list_dir_recursive(&child, rest, entries);
+            child.close()?;
+            result
         }
     }
 }

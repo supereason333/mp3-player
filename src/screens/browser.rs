@@ -8,19 +8,19 @@ use heapless::String;
 use heapless::Vec as HVec;
 
 use embedded_graphics::{
-    mono_font::MonoTextStyle, mono_font::ascii::FONT_4X6, pixelcolor::Rgb565, prelude::*,
+    mono_font::MonoTextStyle, mono_font::ascii::FONT_5X7, pixelcolor::Rgb565, prelude::*,
     text::Text,
 };
 
 use crate::display::FbType;
 use crate::input::{NAV_EVENT, NavEvent};
 use crate::screens::{ScreenLogic, Transition};
-use crate::sd::{DirListing, SD_REQUEST, SD_RESPONSE, SdRequest};
+use crate::sd::{DirListing, DirPath, SD_REQUEST, SD_RESPONSE, SdRequest};
 
 pub struct BrowserScreen {
     entries: DirListing,
     selected_index: usize,
-    path: HVec<HVec<u8, 12>, 8>,
+    path: DirPath,
 }
 
 impl BrowserScreen {
@@ -36,7 +36,7 @@ impl BrowserScreen {
 impl ScreenLogic for BrowserScreen {
     async fn on_enter(&mut self) {
         info!("[Browser] Send SdRequest");
-        SD_REQUEST.send(SdRequest::ListDir(HVec::new())).await;
+        SD_REQUEST.send(SdRequest::ListDir(self.path.clone())).await;
         self.entries = SD_RESPONSE.wait().await;
         info!("[Browser] Recieved Sd Response");
         self.selected_index = 0;
@@ -45,16 +45,46 @@ impl ScreenLogic for BrowserScreen {
     async fn on_event(&mut self, event: NavEvent) -> Transition {
         match event {
             NavEvent::Up => {
-                info!("Up");
+                // info!("Up");
                 self.selected_index = self.selected_index.saturating_sub(1);
             }
             NavEvent::Down => {
-                info!("Down");
+                // info!("Down");
                 self.selected_index =
                     (self.selected_index + 1).min(self.entries.len().saturating_sub(1));
             }
             NavEvent::Select => {
-                info!("Select");
+                // info!("Select");
+
+                let mut buf: String<16> = String::new();
+                let _ = core::write!(buf, "{}", self.entries[self.selected_index].0);
+                let name: &str = &buf;
+                info!("Selected {:?}", name);
+
+                let entry = &self.entries[self.selected_index];
+                if entry.2 {
+                    // Is directory
+                    let mut up_one = false;
+                    if entry.0.base_name().len() == 2 {
+                        if entry.0.base_name()[0..2] == [b'.', b'.'] {
+                            // Selected up one dir
+                            self.path.pop();
+                            up_one = true;
+                        }
+                    }
+                    if !up_one {
+                        self.path
+                            .push(self.entries[self.selected_index].0.clone())
+                            .unwrap();
+                    }
+                    info!("[Browser] Send SdRequest");
+                    SD_REQUEST.send(SdRequest::ListDir(self.path.clone())).await;
+                    self.entries = SD_RESPONSE.wait().await;
+                    info!("[Browser] Recieved Sd Response");
+                    self.selected_index = 0;
+                } else {
+                    // Open normal file
+                }
             }
         }
         Transition::Stay
@@ -64,9 +94,9 @@ impl ScreenLogic for BrowserScreen {
         for (i, (name, _size, is_dir)) in self.entries.iter().enumerate() {
             let style;
             if i == self.selected_index {
-                style = MonoTextStyle::new(&FONT_4X6, Rgb565::GREEN);
+                style = MonoTextStyle::new(&FONT_5X7, Rgb565::GREEN);
             } else {
-                style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE)
+                style = MonoTextStyle::new(&FONT_5X7, Rgb565::WHITE)
             }
 
             let mut buf: String<16> = String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
@@ -82,7 +112,7 @@ impl ScreenLogic for BrowserScreen {
                 .draw(fb)
                 .unwrap();
 
-            info!("File {}", name);
+            // info!("File {}", name);
 
             // let style = PrimitiveStyleBuilder::new()
             //     .stroke_color(Rgb565::CSS_DARK_SLATE_GRAY)
