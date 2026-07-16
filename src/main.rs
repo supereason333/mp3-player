@@ -2,6 +2,7 @@
 #![no_main]
 
 mod bmp820;
+mod decoder;
 mod display;
 mod display_task;
 mod input;

@@ -1,6 +1,7 @@
 // screens/mod.rs
 pub mod browser;
 pub mod cat;
+pub mod player;
 pub mod settings;
 
 use embedded_sdmmc::ShortFileName;
