@@ -39,6 +39,8 @@ pub enum Screen {
     Browser(browser::BrowserScreen),
     Settings(settings::SettingsScreen),
     Cat(cat::CatScreen),
+    // Dialogue(dialogue::DialogueScreen),
+    Player(player::PlayerScreen),
 }
 
 impl Screen {
@@ -47,6 +49,8 @@ impl Screen {
             Screen::Browser(s) => s.on_event(event).await,
             Screen::Settings(s) => s.on_event(event).await,
             Screen::Cat(s) => s.on_event(event).await,
+            // Screen::Dialogue(s) => s.on_event(event).await,
+            Screen::Player(s) => s.on_event(event).await,
         }
     }
 
@@ -55,6 +59,8 @@ impl Screen {
             Screen::Browser(s) => s.draw(fb),
             Screen::Settings(s) => s.draw(fb),
             Screen::Cat(s) => s.draw(fb),
+            // Screen::Dialogue(s) => s.draw(fb),
+            Screen::Player(s) => s.draw(fb),
         }
     }
 
@@ -63,6 +69,8 @@ impl Screen {
             Screen::Browser(s) => s.on_enter().await,
             Screen::Settings(s) => s.on_enter().await,
             Screen::Cat(s) => s.on_enter().await,
+            // Screen::Dialogue(s) => s.on_enter().await,
+            Screen::Player(s) => s.on_enter().await,
         }
     }
 }

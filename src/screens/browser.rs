@@ -15,9 +15,12 @@ use embedded_graphics::{
 use crate::display::FbType;
 use crate::input::{NAV_EVENT, NavEvent};
 use crate::screens::cat::CatScreen;
+use crate::screens::player::PlayerScreen;
+// use crate::screens::dialogue::DialogueScreen;
 use crate::screens::{Screen, ScreenLogic, Transition};
 use crate::sd::{DirListing, DirPath, SD_REQUEST, SD_RESPONSE, SdRequest, SdResponse};
 
+#[derive(Clone)]
 pub struct BrowserScreen {
     entries: DirListing,
     selected_index: usize,
@@ -109,6 +112,10 @@ impl ScreenLogic for BrowserScreen {
                         b"TXT" | b"BIN" | b"PLI" | b"LOG" | b"CFG" | b"RS" => Transition::GoTo(
                             Screen::Cat(CatScreen::new(self.path.clone(), entry.0.clone())),
                         ),
+                        b"WAV" | b"MP3" => Transition::GoTo(Screen::Player(PlayerScreen::new(
+                            self.path.clone(),
+                            entry.0.clone(),
+                        ))),
                         _ => Transition::Stay,
                     };
                 }

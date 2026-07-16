@@ -55,7 +55,6 @@ impl ScreenLogic for CatScreen {
     }
 
     fn draw(&self, fb: &mut FbType) {
-        fb.data_mut().fill(0x00);
         let style = MonoTextStyle::new(&FONT_5X7, Rgb565::GREEN);
 
         let text = match core::str::from_utf8(&self.file_data) {

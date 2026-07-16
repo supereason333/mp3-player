@@ -1,5 +1,10 @@
 use embedded_sdmmc::ShortFileName;
 
+use embedded_graphics::{
+    mono_font::MonoTextStyle, mono_font::ascii::FONT_5X7, pixelcolor::Rgb565, prelude::*,
+    text::Text,
+};
+
 use crate::display::FbType;
 use crate::input::NavEvent;
 use crate::screens::browser::BrowserScreen;
@@ -29,7 +34,16 @@ impl ScreenLogic for PlayerScreen {
 
     async fn on_enter(&mut self) {}
 
-    fn draw(&self, fb: &mut FbType) {}
+    fn draw(&self, fb: &mut FbType) {
+        let style = MonoTextStyle::new(&FONT_5X7, Rgb565::GREEN);
+
+        let text = match core::str::from_utf8(&self.filename().base_name()) {
+            Ok(s) => s,
+            Err(_) => "‹invalid utf-8›",
+        };
+
+        Text::new(text, Point::new(0, 6), style).draw(fb).unwrap();
+    }
 }
 
 impl FileOpenerScreen for PlayerScreen {
