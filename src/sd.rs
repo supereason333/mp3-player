@@ -294,7 +294,7 @@ where
     for segment in path {
         let next = volume_mgr.open_dir(current, segment)?;
         if current != start {
-            volume_mgr.close_dir(current)?; // don't close the caller's original `start` handle
+            volume_mgr.close_dir(current)?; // dont close the caller's original `start` handle
         }
         current = next;
     }
