@@ -20,24 +20,26 @@ use embassy_executor::Spawner;
 use embassy_time::Delay;
 
 // HAL Imports
-use embassy_rp::gpio;
 use embassy_rp::gpio::Level;
 use embassy_rp::gpio::Output;
-use embassy_rp::i2c::InterruptHandler;
-use embassy_rp::peripherals::I2C0;
-use embassy_rp::spi;
+use embassy_rp::peripherals::{DMA_CH3, I2C0, PIO0};
+use embassy_rp::pio::Pio;
+use embassy_rp::pio_programs::i2s::{PioI2sOut, PioI2sOutProgram};
 use embassy_rp::spi::Spi;
+use embassy_rp::{bind_interrupts, dma, gpio, i2c, pio, spi};
 
 use embedded_hal_bus::spi::ExclusiveDevice;
 
-use crate::bmp820::BMP280;
+// use crate::bmp820::BMP280;
 use crate::display::Display;
 use crate::display_task::display_task;
 use crate::input::input_task;
 use crate::sd::sd_task;
 
-embassy_rp::bind_interrupts!(struct Irqs {
-    I2C0_IRQ => InterruptHandler<embassy_rp::peripherals::I2C0>;
+bind_interrupts!(struct Irqs {
+    I2C0_IRQ => i2c::InterruptHandler<I2C0>;
+    PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH3>;
 });
 
 const DISPLAY_FREQ: u32 = 32_000_000;
@@ -94,6 +96,9 @@ async fn main(spawner: Spawner) {
         Ok(device) => device,
         Err(_e) => defmt::panic!("Failed to get exclusive device"),
     };
+
+    // I2S DAC setup
+
     info!("[Main] Spawning");
     _ = spawner.spawn(input_task(btn_up, btn_down, btn_ok));
 
