@@ -103,18 +103,28 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
     }
 }
 
+// fn pcm_bytes_to_i2s_frames(bytes: &[u8; AUDIO_CHUNK_BYTES]) -> [u32; AUDIO_CHUNK_FRAMES] {
+//     // WAV PCM is little-endian 16-bit samples, interleaved L/R for stereo.
+//     // I2S typically wants 32-bit frames (16-bit L in upper/lower half + 16-bit R).
+//     let mut frames: [u32; AUDIO_CHUNK_FRAMES] = [0u32; AUDIO_CHUNK_FRAMES];
+//     let mut chunks = bytes.chunks_exact(4); // 2 bytes L + 2 bytes R = 4 bytes/frame
+//     let mut i = 0;
+//     for chunk in &mut chunks {
+//         let left = i16::from_le_bytes([chunk[0], chunk[1]]) as u16;
+//         let right = i16::from_le_bytes([chunk[2], chunk[3]]) as u16;
+//         let frame = ((left as u32) << 16) | (right as u32); // VERIFY: exact bit layout PioI2sOut expects
+//         frames[i] = frame;
+//         i += 1;
+//     }
+//     frames
+// }
+
 fn pcm_bytes_to_i2s_frames(bytes: &[u8; AUDIO_CHUNK_BYTES]) -> [u32; AUDIO_CHUNK_FRAMES] {
-    // WAV PCM is little-endian 16-bit samples, interleaved L/R for stereo.
-    // I2S typically wants 32-bit frames (16-bit L in upper/lower half + 16-bit R).
-    let mut frames: [u32; AUDIO_CHUNK_FRAMES] = [0u32; AUDIO_CHUNK_FRAMES];
-    let mut chunks = bytes.chunks_exact(4); // 2 bytes L + 2 bytes R = 4 bytes/frame
-    let mut i = 0;
-    for chunk in &mut chunks {
-        let left = i16::from_le_bytes([chunk[0], chunk[1]]) as u16;
-        let right = i16::from_le_bytes([chunk[2], chunk[3]]) as u16;
-        let frame = ((left as u32) << 16) | (right as u32); // VERIFY: exact bit layout PioI2sOut expects
-        frames[i] = frame;
-        i += 1;
+    let mut frames = [0u32; AUDIO_CHUNK_FRAMES];
+    for (i, chunk) in bytes.chunks_exact(2).enumerate() {
+        // 2 bytes per mono sample now, not 4
+        let sample = i16::from_le_bytes([chunk[0], chunk[1]]) as u16;
+        frames[i] = (sample as u32) * 0x10001; // duplicate into both L and R
     }
     frames
 }

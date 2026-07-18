@@ -42,7 +42,7 @@ pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::ne
 
 // audio
 pub const AUDIO_CHUNK_BYTES: usize = 1024 * 8;
-pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 4; // = 256
+pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 2; // = 256
 
 pub enum AudioSdRequest {
     Open(DirPath, ShortFileName),
