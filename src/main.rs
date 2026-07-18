@@ -22,7 +22,7 @@ use embassy_time::Delay;
 // HAL Imports
 use embassy_rp::gpio::Level;
 use embassy_rp::gpio::Output;
-use embassy_rp::peripherals::{DMA_CH3, I2C0, PIO0};
+use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, DMA_CH2, DMA_CH3, I2C0, PIO0};
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::i2s::{PioI2sOut, PioI2sOutProgram};
 use embassy_rp::spi::Spi;
@@ -39,7 +39,7 @@ use crate::sd::sd_task;
 bind_interrupts!(struct Irqs {
     I2C0_IRQ => i2c::InterruptHandler<I2C0>;
     PIO0_IRQ_0 => pio::InterruptHandler<PIO0>;
-    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH3>;
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>, dma::InterruptHandler<DMA_CH2>, dma::InterruptHandler<DMA_CH3>;
 });
 
 const DISPLAY_FREQ: u32 = 32_000_000;
@@ -70,7 +70,7 @@ async fn main(spawner: Spawner) {
     display_config.phase = spi::Phase::CaptureOnFirstTransition;
     display_config.polarity = spi::Polarity::IdleLow;
     // info!("Display Configured");
-    let spi = embassy_rp::spi::Spi::new_txonly(p.SPI1, clk, mosi, p.DMA_CH0, display_config);
+    let spi = embassy_rp::spi::Spi::new_txonly(p.SPI1, clk, mosi, p.DMA_CH0, Irqs, display_config);
     let mut display = Display::new(spi, dcx, rst, cs).await;
     display.init_display().await;
     // info!("Display Init");
@@ -90,7 +90,7 @@ async fn main(spawner: Spawner) {
     let mut config = spi::Config::default();
     config.frequency = 400_000;
 
-    let spi_bus = Spi::new(p.SPI0, clk, mosi, miso, p.DMA_CH1, p.DMA_CH2, config);
+    let spi_bus = Spi::new(p.SPI0, clk, mosi, miso, p.DMA_CH1, p.DMA_CH2, Irqs, config);
 
     let spi_device = match ExclusiveDevice::new(spi_bus, cs_pin, Delay) {
         Ok(device) => device,
@@ -98,6 +98,28 @@ async fn main(spawner: Spawner) {
     };
 
     // I2S DAC setup
+    let Pio {
+        mut common, sm0, ..
+    } = Pio::new(p.PIO0, Irqs);
+
+    let bit_clock_pin = p.PIN_28; // BCK
+    let left_right_clock_pin = p.PIN_26; // LRCK (word select)
+    let data_pin = p.PIN_27; // DIN
+
+    let program = PioI2sOutProgram::new(&mut common);
+    let mut i2s = PioI2sOut::new(
+        &mut common,
+        sm0,
+        p.DMA_CH3,
+        Irqs,
+        data_pin,
+        bit_clock_pin,
+        left_right_clock_pin,
+        dac::SAMPLE_RATE,
+        dac::BIT_DEPTH,
+        &program,
+    );
+    i2s.start();
 
     info!("[Main] Spawning");
     _ = spawner.spawn(input_task(btn_up, btn_down, btn_ok));
