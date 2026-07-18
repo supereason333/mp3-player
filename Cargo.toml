@@ -25,6 +25,7 @@ heapless = "0.9.3"
 # SD card
 embedded-sdmmc = "0.9.0"
 embassy-sync = "0.8.0"
+static_cell = "2.1.1"
 
 # embassy-sync = "0.7.2"
 

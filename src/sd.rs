@@ -38,6 +38,9 @@ pub static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel:
 pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::new();
 
 // audio
+pub const AUDIO_CHUNK_BYTES: usize = 1024;
+pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 4; // = 256
+
 pub enum AudioSdRequest {
     Open(DirPath, ShortFileName),
     ReadChunk,
@@ -46,7 +49,7 @@ pub enum AudioSdRequest {
 
 pub enum AudioSdResponse {
     Opened { data_offset: u32, data_size: u32 }, // offset/size of the PCM data chunk, after header
-    Chunk(HVec<u8, 1024>),
+    Chunk(HVec<u8, AUDIO_CHUNK_BYTES>),
     Eof,
     Error,
 }

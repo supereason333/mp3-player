@@ -18,6 +18,8 @@ use crate::screens::{FileOpenerScreen, Screen, ScreenLogic, Transition};
 use crate::dac;
 use crate::sd::{AUDIO_SD_REQUEST, AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath};
 
+use crate::dac::{DAC_REQUEST, DacRequest};
+
 pub struct PlayerScreen {
     opened_path: DirPath,
     opened_file: ShortFileName,
@@ -46,55 +48,10 @@ impl ScreenLogic for PlayerScreen {
 
     async fn on_enter(&mut self) {
         let _ = self.status.push_str("Opening...");
-
-        AUDIO_SD_REQUEST
-            .send(AudioSdRequest::Open(
-                self.opened_path.clone(),
-                self.opened_file.clone(),
-            ))
-            .await;
-
-        match AUDIO_SD_RESPONSE.wait().await {
-            AudioSdResponse::Opened {
-                data_offset,
-                data_size,
-            } => {
-                info!("[Player] opened, {} bytes of PCM data", data_size);
-                self.status.clear();
-                let _ = core::write!(self.status, "Playing ({} bytes)", data_size);
-
-                // stream and "play" chunks until EOF
-                loop {
-                    AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
-                    match AUDIO_SD_RESPONSE.wait().await {
-                        AudioSdResponse::Chunk(pcm) => {
-                            dac::write_samples(&pcm).await;
-                        }
-                        AudioSdResponse::Eof => {
-                            info!("[Player] playback finished");
-                            self.status.clear();
-                            let _ = self.status.push_str("Done");
-                            break;
-                        }
-                        AudioSdResponse::Error => {
-                            error!("[Player] read error during playback");
-                            self.status.clear();
-                            let _ = self.status.push_str("Error");
-                            break;
-                        }
-                        _ => break,
-                    }
-                }
-
-                AUDIO_SD_REQUEST.send(AudioSdRequest::Close).await;
-                let _ = AUDIO_SD_RESPONSE.wait().await;
-            }
-            _ => {
-                error!("[Player] failed to open file");
-                self.status.clear();
-                let _ = self.status.push_str("Open failed");
-            }
-        }
+        DAC_REQUEST.signal(DacRequest::Start(
+            self.opened_path.clone(),
+            self.opened_file.clone(),
+        ))
     }
 
     fn draw(&self, fb: &mut FbType) {

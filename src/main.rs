@@ -30,6 +30,7 @@ use embassy_rp::{bind_interrupts, dma, gpio, i2c, pio, spi};
 
 use embedded_hal_bus::spi::ExclusiveDevice;
 
+use crate::dac::dac_task;
 // use crate::bmp820::BMP280;
 use crate::display::Display;
 use crate::display_task::display_task;
@@ -102,12 +103,12 @@ async fn main(spawner: Spawner) {
         mut common, sm0, ..
     } = Pio::new(p.PIO0, Irqs);
 
-    let bit_clock_pin = p.PIN_28; // BCK
-    let left_right_clock_pin = p.PIN_26; // LRCK (word select)
-    let data_pin = p.PIN_27; // DIN
+    let bit_clock_pin = p.PIN_26; // BCK
+    let left_right_clock_pin = p.PIN_27; // LRCK (word select)
+    let data_pin = p.PIN_28; // DIN
 
     let program = PioI2sOutProgram::new(&mut common);
-    let mut i2s = PioI2sOut::new(
+    let i2s = PioI2sOut::new(
         &mut common,
         sm0,
         p.DMA_CH3,
@@ -119,7 +120,7 @@ async fn main(spawner: Spawner) {
         dac::BIT_DEPTH,
         &program,
     );
-    i2s.start();
+    // i2s.start();
 
     info!("[Main] Spawning");
     _ = spawner.spawn(input_task(btn_up, btn_down, btn_ok));
@@ -127,4 +128,6 @@ async fn main(spawner: Spawner) {
     _ = spawner.spawn(display_task(display));
 
     _ = spawner.spawn(sd_task(spi_device));
+
+    _ = spawner.spawn(dac_task(i2s))
 }

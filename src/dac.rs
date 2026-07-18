@@ -1,11 +1,102 @@
 use defmt::*;
 
+use core::mem;
+
+use heapless::Vec as HVec;
+
+use embassy_rp::peripherals::PIO0;
+use embassy_rp::pio_programs::i2s::{PioI2sOut, PioI2sOutProgram};
+
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
+
+use embedded_sdmmc::ShortFileName;
+
+use crate::sd::{
+    AUDIO_CHUNK_BYTES, AUDIO_CHUNK_FRAMES, AUDIO_SD_REQUEST, AUDIO_SD_RESPONSE, AudioSdRequest,
+    AudioSdResponse, DirPath,
+};
+
+pub static DAC_REQUEST: Signal<CriticalSectionRawMutex, DacRequest> = Signal::new();
+
+pub enum DacRequest {
+    Start(DirPath, ShortFileName),
+    Play,
+    Pause,
+}
+
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const BIT_DEPTH: u32 = 16;
 
-/// Placeholder for real DAC/I2S output. Just logs how much data "played."
-pub async fn write_samples(pcm: &[u8]) {
-    info!("[DAC] would write {} bytes of PCM", pcm.len());
-    // simulates playback speed
-    embassy_time::Timer::after_micros(50).await;
+#[embassy_executor::task]
+pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
+    info!("[DAC] DAC task spawned");
+    i2s.start();
+    loop {
+        loop {
+            match DAC_REQUEST.wait().await {
+                DacRequest::Start(path, name) => {
+                    AUDIO_SD_REQUEST
+                        .send(AudioSdRequest::Open(path.clone(), name.clone()))
+                        .await;
+                    match AUDIO_SD_RESPONSE.wait().await {
+                        AudioSdResponse::Opened {
+                            data_offset,
+                            data_size,
+                        } => {
+                            info!("[DAC] opened, {} bytes", data_size);
+                            break;
+                        }
+                        _ => {
+                            error!("[DAC] failed to open file");
+                            continue; // back to outer loop, wait for next DacRequest
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        info!("[DAC] Recieved DAC request");
+        AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+        let mut front_buf: HVec<u32, AUDIO_CHUNK_FRAMES> = match AUDIO_SD_RESPONSE.wait().await {
+            AudioSdResponse::Chunk(pcm) => pcm_bytes_to_i2s_frames(&pcm),
+            _ => continue, // failed to get first chunk — bail back to outer loop
+        };
+        let mut back_buf: HVec<u32, AUDIO_CHUNK_FRAMES> = HVec::new();
+        AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+        loop {
+            let future = i2s.write(&front_buf);
+            match AUDIO_SD_RESPONSE.wait().await {
+                AudioSdResponse::Chunk(pcm) => {
+                    AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+                    back_buf = pcm_bytes_to_i2s_frames(&pcm);
+                }
+                AudioSdResponse::Eof => {
+                    info!("[DAC] Playback ended");
+                    break;
+                }
+                AudioSdResponse::Error => {
+                    info!("[DAC] Playback error");
+                    break;
+                }
+                _ => break,
+            }
+            future.await;
+            mem::swap(&mut back_buf, &mut front_buf);
+        }
+    }
+}
+
+fn pcm_bytes_to_i2s_frames(bytes: &[u8]) -> HVec<u32, AUDIO_CHUNK_FRAMES> {
+    // WAV PCM is little-endian 16-bit samples, interleaved L/R for stereo.
+    // I2S typically wants 32-bit frames (16-bit L in upper/lower half + 16-bit R).
+    let mut frames: HVec<u32, AUDIO_CHUNK_FRAMES> = HVec::new();
+    let mut chunks = bytes.chunks_exact(4); // 2 bytes L + 2 bytes R = 4 bytes/frame
+    for chunk in &mut chunks {
+        let left = i16::from_le_bytes([chunk[0], chunk[1]]) as u16;
+        let right = i16::from_le_bytes([chunk[2], chunk[3]]) as u16;
+        let frame = ((left as u32) << 16) | (right as u32); // VERIFY: exact bit layout PioI2sOut expects
+        let _ = frames.push(frame);
+    }
+    frames
 }
