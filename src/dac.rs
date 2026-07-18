@@ -2,7 +2,7 @@ use defmt::*;
 
 use core::mem;
 
-use heapless::Vec as HVec;
+use embassy_time::Instant;
 
 use embassy_rp::peripherals::PIO0;
 use embassy_rp::pio_programs::i2s::{PioI2sOut, PioI2sOutProgram};
@@ -58,18 +58,24 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
         }
         info!("[DAC] Recieved DAC request");
         AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
-        let mut front_buf: HVec<u32, AUDIO_CHUNK_FRAMES> = match AUDIO_SD_RESPONSE.wait().await {
+        let mut front_buf: [u32; AUDIO_CHUNK_FRAMES] = match AUDIO_SD_RESPONSE.wait().await {
             AudioSdResponse::Chunk(pcm) => pcm_bytes_to_i2s_frames(&pcm),
             _ => continue, // failed to get first chunk — bail back to outer loop
         };
-        let mut back_buf: HVec<u32, AUDIO_CHUNK_FRAMES> = HVec::new();
+        let mut back_buf: [u32; AUDIO_CHUNK_FRAMES];
         AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+        let mut i = 0;
         loop {
+            let start = Instant::now();
             let future = i2s.write(&front_buf);
+            let write = start.elapsed().as_millis();
+            let send;
             match AUDIO_SD_RESPONSE.wait().await {
                 AudioSdResponse::Chunk(pcm) => {
                     AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+                    let measure = Instant::now();
                     back_buf = pcm_bytes_to_i2s_frames(&pcm);
+                    send = measure.elapsed().as_millis();
                 }
                 AudioSdResponse::Eof => {
                     info!("[DAC] Playback ended");
@@ -81,22 +87,34 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
                 }
                 _ => break,
             }
+            let response = start.elapsed().as_millis() - write;
             future.await;
+            let future_await = start.elapsed().as_millis() - response;
             mem::swap(&mut back_buf, &mut front_buf);
+
+            if i % 50 == 0 {
+                info!(
+                    "[DAC] write: {} ms, send: {} ms, response: {} ms, future await: {} ms",
+                    write, send, response, future_await
+                );
+            }
+            i += 1;
         }
     }
 }
 
-fn pcm_bytes_to_i2s_frames(bytes: &[u8]) -> HVec<u32, AUDIO_CHUNK_FRAMES> {
+fn pcm_bytes_to_i2s_frames(bytes: &[u8; AUDIO_CHUNK_BYTES]) -> [u32; AUDIO_CHUNK_FRAMES] {
     // WAV PCM is little-endian 16-bit samples, interleaved L/R for stereo.
     // I2S typically wants 32-bit frames (16-bit L in upper/lower half + 16-bit R).
-    let mut frames: HVec<u32, AUDIO_CHUNK_FRAMES> = HVec::new();
+    let mut frames: [u32; AUDIO_CHUNK_FRAMES] = [0u32; AUDIO_CHUNK_FRAMES];
     let mut chunks = bytes.chunks_exact(4); // 2 bytes L + 2 bytes R = 4 bytes/frame
+    let mut i = 0;
     for chunk in &mut chunks {
         let left = i16::from_le_bytes([chunk[0], chunk[1]]) as u16;
         let right = i16::from_le_bytes([chunk[2], chunk[3]]) as u16;
         let frame = ((left as u32) << 16) | (right as u32); // VERIFY: exact bit layout PioI2sOut expects
-        let _ = frames.push(frame);
+        frames[i] = frame;
+        i += 1;
     }
     frames
 }

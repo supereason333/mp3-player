@@ -1,6 +1,7 @@
 use defmt::*;
 use defmt_rtt as _;
 
+use embedded_hal_bus::spi::NoDelay;
 use heapless::Vec as HVec;
 
 use embassy_futures::select::{Either, select};
@@ -16,12 +17,14 @@ use embedded_sdmmc::{
 
 use embassy_rp::gpio::Output;
 use embassy_rp::peripherals::SPI0;
+use embassy_rp::spi;
 use embassy_rp::spi::Async;
 use embassy_rp::spi::Spi;
 
 use embedded_hal_bus::spi::ExclusiveDevice;
 
 use embassy_time::Delay;
+use embassy_time::Instant;
 
 // Simple requests
 pub enum SdRequest {
@@ -38,7 +41,7 @@ pub static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel:
 pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::new();
 
 // audio
-pub const AUDIO_CHUNK_BYTES: usize = 1024;
+pub const AUDIO_CHUNK_BYTES: usize = 1024 * 8;
 pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 4; // = 256
 
 pub enum AudioSdRequest {
@@ -49,7 +52,7 @@ pub enum AudioSdRequest {
 
 pub enum AudioSdResponse {
     Opened { data_offset: u32, data_size: u32 }, // offset/size of the PCM data chunk, after header
-    Chunk(HVec<u8, AUDIO_CHUNK_BYTES>),
+    Chunk([u8; AUDIO_CHUNK_BYTES]),
     Eof,
     Error,
 }
@@ -96,7 +99,7 @@ impl TimeSource for DummyTimesource {
 
 #[embassy_executor::task]
 pub async fn sd_task(
-    spi_device: ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>,
+    spi_device: ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, NoDelay>,
 ) -> ! {
     info!("[SD] SD task spawned");
     let sdcard = SdCard::new(spi_device, Delay);
@@ -108,6 +111,15 @@ pub async fn sd_task(
         ),
     };
     info!("[SD] card size is {} bytes", sd_size);
+
+    sdcard.spi(|spi_dev| {
+        info!("[SD] reconfiguring SPI speed");
+        spi_dev.bus_mut().set_config(&{
+            let mut cfg = spi::Config::default();
+            cfg.frequency = 24_000_000;
+            cfg
+        });
+    });
 
     let mut volume_mgr = VolumeManager::new(sdcard, DummyTimesource::default());
 
@@ -205,13 +217,14 @@ pub async fn sd_task(
                 }
 
                 AudioSdRequest::ReadChunk => {
+                    let start = Instant::now();
                     if let Some(state) = &playback {
-                        let mut buf: HVec<u8, 1024> = HVec::new();
-                        buf.resize_default(1024).ok();
+                        let mut buf: [u8; AUDIO_CHUNK_BYTES] = [0u8; AUDIO_CHUNK_BYTES];
+                        // buf.resize_default(AUDIO_CHUNK_BYTES).ok();
                         match volume_mgr.read(state.file, &mut buf) {
                             Ok(0) => AUDIO_SD_RESPONSE.signal(AudioSdResponse::Eof),
                             Ok(n) => {
-                                buf.truncate(n);
+                                // buf.truncate(n);
                                 AUDIO_SD_RESPONSE.signal(AudioSdResponse::Chunk(buf));
                             }
                             Err(e) => {
@@ -222,6 +235,7 @@ pub async fn sd_task(
                     } else {
                         AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
                     }
+                    // info!("[SD] readchunk took {} ms", start.elapsed().as_millis())
                 }
 
                 AudioSdRequest::Close => {

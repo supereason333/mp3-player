@@ -93,7 +93,7 @@ async fn main(spawner: Spawner) {
 
     let spi_bus = Spi::new(p.SPI0, clk, mosi, miso, p.DMA_CH1, p.DMA_CH2, Irqs, config);
 
-    let spi_device = match ExclusiveDevice::new(spi_bus, cs_pin, Delay) {
+    let spi_device = match ExclusiveDevice::new_no_delay(spi_bus, cs_pin) {
         Ok(device) => device,
         Err(_e) => defmt::panic!("Failed to get exclusive device"),
     };
