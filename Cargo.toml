@@ -14,7 +14,7 @@ panic-probe = { version = "1.0.0", features = ["print-defmt"] }
 embassy-executor = { version = "0.9.0", features = ["arch-cortex-m", "executor-thread", "defmt"] }
 embassy-futures = "0.1.2"
 embassy-time = "0.5.0"
-embassy-rp = { version = "0.8.0", features = ["time-driver", "critical-section-impl", "rp235xa", "defmt"] }
+embassy-rp = { version = "0.10.0", features = ["time-driver", "critical-section-impl", "rp235xa", "defmt"] }
 
 # For the screen
 embedded-graphics = "0.8"
