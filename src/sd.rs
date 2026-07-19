@@ -1,6 +1,7 @@
 use defmt::*;
 use defmt_rtt as _;
 
+use embassy_sync::pubsub::Error;
 use embedded_hal_bus::spi::NoDelay;
 use heapless::Vec as HVec;
 
@@ -11,8 +12,8 @@ use embassy_sync::channel::Channel;
 use embassy_sync::signal::Signal;
 
 use embedded_sdmmc::{
-    Directory, RawDirectory, RawFile, RawVolume, SdCard, ShortFileName, TimeSource, Timestamp,
-    VolumeIdx, VolumeManager,
+    RawDirectory, RawFile, RawVolume, SdCard, ShortFileName, TimeSource, Timestamp, VolumeIdx,
+    VolumeManager,
 };
 
 use embassy_rp::gpio::Output;
@@ -149,28 +150,8 @@ pub async fn sd_task(
                 SdRequest::ReadFile(path, name) => {
                     let mut buf: HVec<u8, 512> = HVec::new();
 
-                    // let result = (|| -> Result<(), SdError> {
-                    //     let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
-                    //     let root = volume0.open_root_dir()?;
-
-                    //     let r = with_dir_at_path(&root, &path, |target_dir| {
-                    //         let file = target_dir
-                    //             .open_file_in_dir(name.clone(), embedded_sdmmc::Mode::ReadOnly)?;
-                    //         buf.resize_default(512).ok();
-                    //         let bytes_read = file.read(&mut buf)?;
-                    //         buf.truncate(bytes_read);
-                    //         file.close()?;
-                    //         Ok(())
-                    //     });
-
-                    //     root.close().unwrap();
-                    //     volume0.close().unwrap();
-                    //     r
-                    // })();
-
-                    // if let Err(e) = result {
-                    //     error!("[SD] ReadFile failed: {:?}", Debug2Format(&e));
-                    // }
+                    // TEMPORARYLY NOT USED REMOVED, WRITE AGAIN LATER!
+                    // Just retunrs empty data
 
                     SD_RESPONSE.signal(SdResponse::FileContents(buf));
                 }
@@ -181,7 +162,13 @@ pub async fn sd_task(
                         let raw_volume = volume_mgr.open_raw_volume(VolumeIdx(0))?;
                         let raw_root = volume_mgr.open_root_dir(raw_volume)?;
 
-                        let raw_dir = open_raw_dir_path(&mut volume_mgr, raw_root, &path)?; // raw-handle version of your recursive walker
+                        let raw_dir;
+                        if (&path).len() == 0 {
+                            raw_dir = raw_root;
+                        } else {
+                            raw_dir = open_raw_dir_path(&mut volume_mgr, raw_root, &path)?; // raw-handle version of your recursive walker
+                            volume_mgr.close_dir(raw_root).unwrap();
+                        }
 
                         let raw_file = volume_mgr.open_file_in_dir(
                             raw_dir,
@@ -194,7 +181,7 @@ pub async fn sd_task(
                         let data_size =
                             u32::from_le_bytes([header[40], header[41], header[42], header[43]]);
 
-                        volume_mgr.close_dir(raw_dir)?; // done walking, don't need the dir handle anymore
+                        volume_mgr.close_dir(raw_dir).unwrap(); // done walking, don't need the dir handle anymore
                         // NOTE: raw_root and any intermediate dirs opened during the walk should be closed too
 
                         playback = Some(AudioPlaybackState {
@@ -260,37 +247,16 @@ fn close(
         DummyTimesource,
     >,
 ) {
-    let _ = volume_mgr.close_file(state.file);
-    let _ = volume_mgr.close_volume(state.volume);
+    match volume_mgr.close_file(state.file) {
+        Ok(()) => {}
+        Err(e) => info!("[SD] Unable to close file {}", Debug2Format(&e)),
+    }
+    match volume_mgr.close_volume(state.volume) {
+        Ok(()) => {}
+        Err(e) => info!("[SD] Unable to close volume {}", Debug2Format(&e)),
+    }
 }
 
-// fn list_dir_recursive<D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
-//     dir: &Directory<D, T, DIRS, FILES, VOLS>,
-//     path: &[ShortFileName],
-//     entries: &mut DirListing,
-// ) -> Result<(), embedded_sdmmc::Error<D::Error>>
-// where
-//     D: embedded_sdmmc::BlockDevice,
-//     T: embedded_sdmmc::TimeSource,
-// {
-//     with_dir_at_path(dir, path, |target_dir| {
-//         target_dir.iterate_dir(|entry| {
-//             if entry.attributes.is_system()
-//                 || entry.attributes.is_volume()
-//                 || entry.name.base_name()[0] == b'_'
-//                 || (entry.name.base_name().len() == 1 && entry.name.base_name()[0] == b'.')
-//             {
-//                 return;
-//             }
-//             let _ = entries.push((
-//                 entry.name.clone(),
-//                 entry.size,
-//                 entry.attributes.is_directory(),
-//             ));
-//         })
-//     })
-// }
-//
 fn list_dir_recursive<D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
     volume_mgr: &VolumeManager<D, T, DIRS, FILES, VOLS>,
     start: RawDirectory,
@@ -334,6 +300,10 @@ where
     D: embedded_sdmmc::BlockDevice,
     T: embedded_sdmmc::TimeSource,
 {
+    // info!("Path Length: {}", path.len());
+    // if path.len() == 0 {
+    //     return Ok(start);
+    // }
     let mut current = start;
     for segment in path {
         let next = volume_mgr.open_dir(current, segment)?;
