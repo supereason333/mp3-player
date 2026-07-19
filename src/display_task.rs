@@ -35,6 +35,7 @@ pub async fn display_task(mut display: Display) {
         match screen.on_event(event).await {
             Transition::Stay => {}
             Transition::GoTo(new_screen) => {
+                screen.on_close().await;
                 screen = new_screen;
                 screen.on_enter().await;
             }

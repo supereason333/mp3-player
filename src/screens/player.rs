@@ -16,7 +16,9 @@ use crate::screens::browser::BrowserScreen;
 use crate::screens::{FileOpenerScreen, Screen, ScreenLogic, Transition};
 
 use crate::dac;
-use crate::sd::{AUDIO_SD_REQUEST, AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath};
+use crate::sd::{
+    AUDIO_SD_REQUEST, AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath, SdResponse,
+};
 
 use crate::dac::{DAC_REQUEST, DacRequest};
 
@@ -39,9 +41,19 @@ impl PlayerScreen {
 impl ScreenLogic for PlayerScreen {
     async fn on_event(&mut self, event: NavEvent) -> Transition {
         match event {
-            NavEvent::Select => Transition::GoTo(Screen::Browser(BrowserScreen::new_with_path(
-                self.opened_path.clone(),
-            ))),
+            NavEvent::Select => {
+                info!("[Player] Send DAC request stop signal");
+                DAC_REQUEST.signal(DacRequest::Stop);
+                loop {
+                    match AUDIO_SD_RESPONSE.wait().await {
+                        AudioSdResponse::Eof => break,
+                        _ => {}
+                    }
+                }
+                Transition::GoTo(Screen::Browser(BrowserScreen::new_with_path(
+                    self.opened_path.clone(),
+                )))
+            }
             _ => Transition::Stay,
         }
     }

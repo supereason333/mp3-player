@@ -124,6 +124,8 @@ impl ScreenLogic for BrowserScreen {
         Transition::Stay
     }
 
+    async fn on_close(&mut self) {}
+
     fn draw(&self, fb: &mut FbType) {
         for (i, (name, _size, is_dir)) in self.entries.iter().enumerate() {
             let style;

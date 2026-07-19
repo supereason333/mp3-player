@@ -26,6 +26,9 @@ pub trait ScreenLogic {
 
     /// Called once when this screen becomes active (e.g. to kick off an SD request)
     async fn on_enter(&mut self) {}
+
+    /// Called jus tbefore the screen closes, for cleaning up and other logic
+    async fn on_close(&mut self) {}
 }
 
 pub trait FileOpenerScreen {
@@ -71,6 +74,15 @@ impl Screen {
             Screen::Cat(s) => s.on_enter().await,
             // Screen::Dialogue(s) => s.on_enter().await,
             Screen::Player(s) => s.on_enter().await,
+        }
+    }
+
+    pub async fn on_close(&mut self) {
+        match self {
+            Screen::Browser(s) => s.on_close().await,
+            Screen::Settings(s) => s.on_close().await,
+            Screen::Cat(s) => s.on_close().await,
+            Screen::Player(s) => s.on_close().await,
         }
     }
 }
