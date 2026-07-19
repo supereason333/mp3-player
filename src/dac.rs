@@ -111,13 +111,13 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
             // let future_await = start.elapsed().as_millis() - response;
             mem::swap(&mut back_buf, &mut front_buf);
 
-            if i % 50 == 0 {
-                // info!(
-                //     "[DAC] write: {} ms, send: {} ms, response: {} ms, future await: {} ms",
-                //     write, send, response, future_await
-                // );
-            }
-            i += 1;
+            // if i % 50 == 0 {
+            //     let target = info!(
+            //         "[DAC] write: {} ms, response: {} ms, future await: {} ms",
+            //         write, response, future_await
+            //     );
+            // }
+            // i += 1;
         }
     }
 }

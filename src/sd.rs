@@ -43,7 +43,7 @@ pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::ne
 
 // audio
 pub const AUDIO_CHUNK_BYTES: usize = 1024 * 8;
-pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 2; // = 256
+pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 2;
 
 pub enum AudioSdRequest {
     Open(DirPath, ShortFileName),
@@ -166,7 +166,7 @@ pub async fn sd_task(
                         if (&path).len() == 0 {
                             raw_dir = raw_root;
                         } else {
-                            raw_dir = open_raw_dir_path(&mut volume_mgr, raw_root, &path)?; // raw-handle version of your recursive walker
+                            raw_dir = open_raw_dir_path(&mut volume_mgr, raw_root, &path)?;
                             volume_mgr.close_dir(raw_root).unwrap();
                         }
 
@@ -204,7 +204,7 @@ pub async fn sd_task(
                 }
 
                 AudioSdRequest::ReadChunk => {
-                    let start = Instant::now();
+                    // let start = Instant::now();
                     if let Some(state) = &playback {
                         let mut buf: [u8; AUDIO_CHUNK_BYTES] = [0u8; AUDIO_CHUNK_BYTES];
                         // buf.resize_default(AUDIO_CHUNK_BYTES).ok();
@@ -216,6 +216,9 @@ pub async fn sd_task(
                             }
                             Ok(n) => {
                                 // buf.truncate(n);
+                                if n != AUDIO_CHUNK_BYTES {
+                                    info!("Trailing zeros in audio chunk, len {}", n);
+                                }
                                 AUDIO_SD_RESPONSE.signal(AudioSdResponse::Chunk(buf));
                             }
                             Err(e) => {

@@ -30,7 +30,7 @@ pub async fn display_task(mut display: Display) {
         screen.draw(&mut fb);
         display.write_framebuf(&fb).await;
 
-        let event = NAV_EVENT.wait().await; // or select() with a ticker, per earlier answer
+        let event = NAV_EVENT.wait().await;
 
         match screen.on_event(event).await {
             Transition::Stay => {}
