@@ -77,10 +77,11 @@ async fn main(spawner: Spawner) {
     // info!("Display Init");
 
     // buttons
-    let mut _btn = gpio::Input::new(p.PIN_15, gpio::Pull::Up);
-    let btn_up = gpio::Input::new(p.PIN_2, gpio::Pull::Up);
-    let btn_down = gpio::Input::new(p.PIN_3, gpio::Pull::Up);
-    let btn_ok = gpio::Input::new(p.PIN_4, gpio::Pull::Up);
+    let dial_down = gpio::Input::new(p.PIN_2, gpio::Pull::Up);
+    let dial_up = gpio::Input::new(p.PIN_3, gpio::Pull::Up);
+    let dial_select = gpio::Input::new(p.PIN_4, gpio::Pull::Up);
+    let btn_play = gpio::Input::new(p.PIN_6, gpio::Pull::Up);
+    let btn_back = gpio::Input::new(p.PIN_5, gpio::Pull::Up);
 
     // SD card
     let miso = p.PIN_16;
@@ -123,7 +124,13 @@ async fn main(spawner: Spawner) {
     // i2s.start();
 
     info!("[Main] Spawning");
-    _ = spawner.spawn(input_task(btn_up, btn_down, btn_ok));
+    _ = spawner.spawn(input_task(
+        dial_up,
+        dial_down,
+        dial_select,
+        btn_play,
+        btn_back,
+    ));
 
     _ = spawner.spawn(display_task(display));
 

@@ -61,11 +61,11 @@ impl ScreenLogic for BrowserScreen {
 
     async fn on_event(&mut self, event: NavEvent) -> Transition {
         match event {
-            NavEvent::Up => {
+            NavEvent::Up | NavEvent::For => {
                 // info!("Up");
                 self.selected_index = self.selected_index.saturating_sub(1);
             }
-            NavEvent::Down => {
+            NavEvent::Down | NavEvent::Rev => {
                 // info!("Down");
                 self.selected_index =
                     (self.selected_index + 1).min(self.entries.len().saturating_sub(1));
@@ -120,6 +120,7 @@ impl ScreenLogic for BrowserScreen {
                     };
                 }
             }
+            _ => {}
         }
         Transition::Stay
     }

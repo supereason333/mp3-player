@@ -37,11 +37,11 @@ impl CatScreen {
 impl ScreenLogic for CatScreen {
     async fn on_event(&mut self, event: NavEvent) -> Transition {
         match event {
-            NavEvent::Up => {
+            NavEvent::Up | NavEvent::For => {
                 // info!("Up");
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
             }
-            NavEvent::Down => {
+            NavEvent::Down | NavEvent::Rev => {
                 // info!("Down");
                 self.scroll_offset = self.scroll_offset.saturating_add(1);
             }
@@ -50,6 +50,7 @@ impl ScreenLogic for CatScreen {
                     self.opened_path.clone(),
                 )));
             }
+            _ => {}
         }
         Transition::Stay
     }
