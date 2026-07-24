@@ -60,6 +60,9 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
                 _ => {}
             }
         }
+
+        // Start playback
+
         info!("[DAC] Recieved DAC request");
         AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
         let mut front_buf: [u32; AUDIO_CHUNK_FRAMES] = match AUDIO_SD_RESPONSE.wait().await {

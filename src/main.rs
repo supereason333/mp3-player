@@ -134,7 +134,7 @@ async fn main(spawner: Spawner) {
 
     _ = spawner.spawn(display_task(display));
 
-    _ = spawner.spawn(sd_task(spi_device));
+    _ = spawner.spawn(sd_task::sd_task(spi_device));
 
     _ = spawner.spawn(dac_task(i2s))
 }
