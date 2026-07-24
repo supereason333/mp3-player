@@ -14,7 +14,7 @@ use crate::display::FbType;
 use crate::input::NavEvent;
 use crate::screens::browser::BrowserScreen;
 use crate::screens::{FileOpenerScreen, Screen, ScreenLogic, Transition};
-use crate::sd::{DirListing, DirPath, SD_REQUEST, SD_RESPONSE, SdRequest, SdResponse};
+use crate::sd::sd_task::{DirListing, DirPath, SD_REQUEST, SD_RESPONSE, SdRequest, SdResponse};
 
 pub struct CatScreen {
     opened_path: DirPath,
@@ -114,7 +114,7 @@ impl FileOpenerScreen for CatScreen {
     fn filename(&self) -> &embedded_sdmmc::ShortFileName {
         self.opened_path.last().unwrap()
     }
-    fn return_path(&self) -> &crate::sd::DirPath {
+    fn return_path(&self) -> &DirPath {
         &self.opened_path
     }
 }

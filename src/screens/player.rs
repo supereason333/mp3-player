@@ -16,7 +16,7 @@ use crate::screens::browser::BrowserScreen;
 use crate::screens::{FileOpenerScreen, Screen, ScreenLogic, Transition};
 
 use crate::dac;
-use crate::sd::{
+use crate::sd::sd_task::{
     AUDIO_SD_REQUEST, AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath, SdResponse,
 };
 

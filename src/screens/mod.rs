@@ -9,7 +9,7 @@ use embedded_sdmmc::ShortFileName;
 use crate::{
     display::FbType,
     input::{NAV_EVENT, NavEvent},
-    sd::DirPath,
+    sd::sd_task::DirPath,
 };
 
 pub enum Transition {
