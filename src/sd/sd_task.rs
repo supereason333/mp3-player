@@ -66,7 +66,6 @@ pub enum AudioSdRequest {
 
 pub enum AudioSdResponse {
     Opened { data_offset: u32, data_size: u32 }, // offset/size of the PCM data chunk, after header
-    Chunk,
     Eof,
     Error,
     Closed,
@@ -130,7 +129,7 @@ pub async fn sd_task(
         });
     });
 
-    let mut volume_mgr = VolumeManager::new(sdcard, DummyTimesource::default());
+    let volume_mgr = VolumeManager::new(sdcard, DummyTimesource::default());
 
     let mut playback: Option<AudioPlaybackState> = None;
 
@@ -141,9 +140,8 @@ pub async fn sd_task(
     AUDIO_EMPTY.try_send(buf1).ok();
 
     loop {
-        // Always check audio first, it is first priority
         if let Ok(req) = AUDIO_SD_REQUEST.try_receive() {
-            // handle_audio(&mut volume_mgr, &mut playback, req).await;
+            handle_audio_request(req, &volume_mgr, &mut playback).await;
             continue;
         }
 
@@ -278,6 +276,7 @@ async fn handle_audio_request<'a, D, T, const DIRS: usize, const FILES: usize, c
         }
         AudioSdRequest::ReadChunk => {
             // Make sure buf is NOT DROPPED
+            // info!("[SD] ReadChunk Recieved");
             let buf = AUDIO_EMPTY.receive().await; // Wait for a free buffer
             if let Some(state) = &playback_state {
                 match volume_mgr.read(state.file, buf.as_mut_slice()) {

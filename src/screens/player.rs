@@ -17,7 +17,8 @@ use crate::screens::{FileOpenerScreen, Screen, ScreenLogic, Transition};
 
 use crate::dac;
 use crate::sd::sd_task::{
-    AUDIO_SD_REQUEST, AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath, SdResponse,
+    AUDIO_SD_REQUEST, AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath, SD_REQUEST,
+    SdRequest, SdResponse,
 };
 
 use crate::dac::{DAC_REQUEST, DacRequest};

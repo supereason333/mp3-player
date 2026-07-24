@@ -86,17 +86,13 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
             // let write = start.elapsed().as_millis();
 
             match select3(
-                AUDIO_FILLED.receive(),
                 DAC_REQUEST.wait(),
+                AUDIO_FILLED.receive(),
                 AUDIO_SD_RESPONSE.wait(),
             )
             .await
             {
-                Either3::First(buf) => {
-                    pcm_bytes_to_i2s_frames(buf, back_buf);
-                    AUDIO_EMPTY.send(buf).await;
-                }
-                Either3::Second(dac_request) => match dac_request {
+                Either3::First(dac_request) => match dac_request {
                     DacRequest::Start(path, name) => {
                         AUDIO_SD_REQUEST.send(AudioSdRequest::Close).await;
                         break;
@@ -109,6 +105,12 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
                         break;
                     }
                 },
+                Either3::Second(buf) => {
+                    // info!("[DAC] Chunk recieved");
+                    pcm_bytes_to_i2s_frames(buf, back_buf);
+                    AUDIO_EMPTY.send(buf).await;
+                    AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+                }
                 Either3::Third(sd_response) => match sd_response {
                     AudioSdResponse::Eof => {
                         info!("[DAC] Playback ended");
