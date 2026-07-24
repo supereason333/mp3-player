@@ -74,12 +74,12 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
 
         info!("[DAC] Recieved DAC request");
         AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
-        let mut buf_a = AUDIO_FILLED.receive().await;
+        let buf_a = AUDIO_FILLED.receive().await;
         pcm_bytes_to_i2s_frames(buf_a, front_buf);
         AUDIO_EMPTY.send(buf_a).await;
 
         AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
-        let mut i = 0;
+        // let mut i = 0;
         loop {
             // let start = Instant::now();
             let future = i2s.write(front_buf);
@@ -112,10 +112,12 @@ pub async fn dac_task(mut i2s: PioI2sOut<'static, PIO0, 0>) {
                 Either3::Third(sd_response) => match sd_response {
                     AudioSdResponse::Eof => {
                         info!("[DAC] Playback ended");
+                        AUDIO_SD_REQUEST.send(AudioSdRequest::Close).await;
                         break;
                     }
                     AudioSdResponse::Error => {
                         info!("[DAC] Playback error");
+                        AUDIO_SD_REQUEST.send(AudioSdRequest::Close).await;
                         break;
                     }
                     _ => {

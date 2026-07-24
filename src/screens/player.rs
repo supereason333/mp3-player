@@ -46,7 +46,7 @@ impl ScreenLogic for PlayerScreen {
                 DAC_REQUEST.signal(DacRequest::Stop);
                 loop {
                     match AUDIO_SD_RESPONSE.wait().await {
-                        AudioSdResponse::Eof => break,
+                        AudioSdResponse::Closed => break,
                         _ => {}
                     }
                 }

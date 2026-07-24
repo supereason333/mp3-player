@@ -168,7 +168,7 @@ async fn handle_ui_request<'a, D, T, const DIRS: usize, const FILES: usize, cons
             let mut entries: HVec<(ShortFileName, u32, bool), 32> = HVec::new();
             let volume = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
             let root = volume.open_root_dir().unwrap();
-            let mut directory = open_dir_path(volume_mgr, root, &path).unwrap();
+            let directory = open_dir_path(volume_mgr, root, &path).unwrap();
 
             directory
                 .iterate_dir(|entry| {
@@ -187,6 +187,9 @@ async fn handle_ui_request<'a, D, T, const DIRS: usize, const FILES: usize, cons
                     ));
                 })
                 .unwrap();
+
+            directory.close().unwrap();
+            volume.close().unwrap();
 
             SD_RESPONSE.signal(SdResponse::DirListing(entries));
         }
@@ -279,8 +282,9 @@ async fn handle_audio_request<'a, D, T, const DIRS: usize, const FILES: usize, c
             if let Some(state) = &playback_state {
                 match volume_mgr.read(state.file, buf.as_mut_slice()) {
                     Ok(0) => {
-                        let mut state = playback_state.take().unwrap();
-                        close(&mut state, volume_mgr);
+                        // Dosent close it, need seperate close on EOF
+                        // let mut state = playback_state.take().unwrap();
+                        // close(&mut state, volume_mgr).unwrap();
                         AUDIO_EMPTY.send(buf).await;
                         AUDIO_SD_RESPONSE.signal(AudioSdResponse::Eof);
                     }
@@ -306,122 +310,6 @@ async fn handle_audio_request<'a, D, T, const DIRS: usize, const FILES: usize, c
     }
 }
 
-//         match select(SD_REQUEST.receive(), AUDIO_SD_REQUEST.receive()).await {
-//             Either::First(ui_request) => match ui_request {
-//                 SdRequest::ListDir(path) => {
-//                     let mut entries: DirListing = HVec::new();
-
-//                     let result = (|| -> Result<(), SdError> {
-//                         let volume0 = volume_mgr.open_raw_volume(VolumeIdx(0))?;
-//                         let root = volume_mgr.open_root_dir(volume0).unwrap();
-//                         let result = list_dir_recursive(&volume_mgr, root, &path, &mut entries);
-//                         volume_mgr.close_dir(root).unwrap();
-//                         volume_mgr.close_volume(volume0).unwrap();
-//                         result
-//                     })();
-
-//                     if let Err(e) = result {
-//                         error!("SD list error: {:?}", Debug2Format(&e));
-//                     }
-
-//                     SD_RESPONSE.signal(SdResponse::DirListing(entries));
-//                 }
-//                 SdRequest::ReadFile(path, name) => {
-//                     let mut buf: HVec<u8, 512> = HVec::new();
-
-//                     // TEMPORARYLY NOT USED REMOVED, WRITE AGAIN LATER!
-//                     // Just retunrs empty data
-
-//                     SD_RESPONSE.signal(SdResponse::FileContents(buf));
-//                 }
-//             },
-//             Either::Second(audio_request) => match audio_request {
-//                 AudioSdRequest::Open(path, name) => {
-//                     let result = (|| -> Result<u32, SdError> {
-//                         let raw_volume = volume_mgr.open_raw_volume(VolumeIdx(0))?;
-//                         let raw_root = volume_mgr.open_root_dir(raw_volume)?;
-
-//                         let raw_dir;
-//                         if (&path).len() == 0 {
-//                             raw_dir = raw_root;
-//                         } else {
-//                             raw_dir = open_raw_dir_path(&mut volume_mgr, raw_root, &path)?;
-//                             volume_mgr.close_dir(raw_root).unwrap();
-//                         }
-
-//                         let raw_file = volume_mgr.open_file_in_dir(
-//                             raw_dir,
-//                             name.clone(),
-//                             embedded_sdmmc::Mode::ReadOnly,
-//                         )?;
-
-//                         let mut header = [0u8; 44];
-//                         volume_mgr.read(raw_file, &mut header)?;
-//                         let data_size =
-//                             u32::from_le_bytes([header[40], header[41], header[42], header[43]]);
-
-//                         volume_mgr.close_dir(raw_dir).unwrap(); // done walking, don't need the dir handle anymore
-//                         // NOTE: raw_root and any intermediate dirs opened during the walk should be closed too
-
-//                         playback = Some(AudioPlaybackState {
-//                             volume: raw_volume,
-//                             file: raw_file,
-//                         });
-//                         Ok(data_size)
-//                     })();
-
-//                     match result {
-//                         Ok(size) => AUDIO_SD_RESPONSE.signal(AudioSdResponse::Opened {
-//                             data_offset: 44,
-//                             data_size: size,
-//                         }),
-//                         Err(e) => {
-//                             error!("[SD] audio open failed: {:?}", Debug2Format(&e));
-//                             AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
-//                         }
-//                     }
-//                 }
-
-//                 AudioSdRequest::ReadChunk => {
-//                     // let start = Instant::now();
-//                     if let Some(state) = &playback {
-//                         let mut buf: [u8; AUDIO_CHUNK_BYTES] = [0u8; AUDIO_CHUNK_BYTES];
-//                         // buf.resize_default(AUDIO_CHUNK_BYTES).ok();
-//                         match volume_mgr.read(state.file, &mut buf) {
-//                             Ok(0) => {
-//                                 close(state, &volume_mgr);
-//                                 playback = None;
-//                                 AUDIO_SD_RESPONSE.signal(AudioSdResponse::Eof)
-//                             }
-//                             Ok(n) => {
-//                                 // buf.truncate(n);
-//                                 if n != AUDIO_CHUNK_BYTES {
-//                                     info!("Trailing zeros in audio chunk, len {}", n);
-//                                 }
-//                                 AUDIO_SD_RESPONSE.signal(AudioSdResponse::Chunk(buf));
-//                             }
-//                             Err(e) => {
-//                                 error!("[SD] audio read failed: {:?}", Debug2Format(&e));
-//                                 AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
-//                             }
-//                         }
-//                     } else {
-//                         AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
-//                     }
-//                     // info!("[SD] readchunk took {} ms", start.elapsed().as_millis())
-//                 }
-
-//                 AudioSdRequest::Close => {
-//                     if let Some(state) = playback.take() {
-//                         close(&state, &volume_mgr);
-//                     }
-//                     AUDIO_SD_RESPONSE.signal(AudioSdResponse::Eof);
-//                 }
-//             },
-//         }
-//     }
-// }
-
 fn close<'a, D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
     state: &mut AudioPlaybackState,
     volume_mgr: &'a VolumeManager<D, T, DIRS, FILES, VOLS>,
@@ -430,14 +318,14 @@ where
     D: embedded_sdmmc::BlockDevice,
     T: embedded_sdmmc::TimeSource,
 {
-    let volume_result = volume_mgr.close_volume(state.volume);
     let file_result = volume_mgr.close_file(state.file);
+    let volume_result = volume_mgr.close_volume(state.volume);
 
-    if let Err(e) = &volume_result {
-        error!("[SD] failed to close volume: {:?}", Debug2Format(e));
-    }
     if let Err(e) = &file_result {
         error!("[SD] failed to close file: {:?}", Debug2Format(e));
+    }
+    if let Err(e) = &volume_result {
+        error!("[SD] failed to close volume: {:?}", Debug2Format(e));
     }
 
     // surface the first error to the caller, if either failed
@@ -446,10 +334,6 @@ where
     Ok(())
 }
 
-/// Opens a directory from a path, starting at `start`. Returns a guarded `Directory`
-/// that auto-closes on drop. Internally uses raw handles for the walk to avoid
-/// borrow conflicts between parent/child `Directory` guards during recursion,
-/// then converts the final result back to a guarded type for the caller.
 fn open_dir_path<'a, D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
     volume_mgr: &'a VolumeManager<D, T, DIRS, FILES, VOLS>,
     start: Directory<'a, D, T, DIRS, FILES, VOLS>,
@@ -479,9 +363,6 @@ where
     }
 }
 
-/// Opens raw dir from path. Does not take ownership of `start` — caller keeps it open.
-/// Any intermediate directories opened during the walk are closed automatically,
-/// even on early failure, via drop guards.
 fn open_raw_dir_path<D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
     volume_mgr: &VolumeManager<D, T, DIRS, FILES, VOLS>,
     start: RawDirectory,
@@ -505,8 +386,11 @@ where
         let next_guard = next_raw.to_directory(volume_mgr);
 
         // close the previous intermediate now that we've moved past it
-        drop(current_guard.take());
+        if let Some(dir) = current_guard.take() {
+            dir.close().unwrap();
+        }
 
+        volume_mgr.close_dir(current).unwrap();
         current = next_raw;
         current_guard = Some(next_guard);
     }
