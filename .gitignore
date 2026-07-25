@@ -1,5 +1,5 @@
 # Rust / Cargo
-target/
+firmware/target/
 
 # Embedded build artifacts
 *.elf
@@ -10,18 +10,61 @@ target/
 
 # Debug / probe output
 *.log
-probe-rs-log/
+firmware/probe-rs-log/
 
 # macOS
 .DS_Store
 **/.DS_Store
 
 # Editor
-.vscode/
-.idea/
+firmware/.vscode/
+firmware/.idea/
 *.swp
 *.swo
 *~
 
 # Environment / secrets
-.env
+firmware/.env
+
+
+# KiCad hardware
+# Temporary files
+*.000
+*.bak
+*.bck
+*.kicad_pcb-bak
+*.kicad_sch-bak
+*-backups
+*-cache*
+*-bak
+*-bak*
+*~
+~*
+_autosave-*
+hardware\#auto_saved_files\#
+*.tmp
+*-save.pro
+*-save.kicad_pcb
+fp-info-cache
+~*.lck
+hardware\#auto_saved_files#
+
+# Netlist files (exported from Eeschema)
+*.net
+
+# Autorouter files (exported from Pcbnew)
+*.dsn
+*.ses
+
+# Exported BOM files
+hardware/**/*.csv
+hardware/**/*.xml
+
+# Archived Backups (KiCad 6.0)
+**/*-backups/*.zip
+
+# Local git-based history (KiCad 9.0+)
+hardware/.history
+
+# Local project settings
+*.kicad_prl
