@@ -19,6 +19,7 @@ use esp_hal::{
     dma::{DmaRxBuf, DmaTxBuf},
     dma_buffers,
     gpio::{Input, InputConfig, Level, Pull},
+    i2s::master::{Config as I2sConfig, DataFormat, I2s},
     main,
     spi::{
         Mode,
@@ -101,6 +102,22 @@ async fn main(spawner: Spawner) -> ! {
     .with_dma(dma_channel)
     .with_buffers(dma_rx_buf, dma_tx_buf)
     .into_async();
+
+    // I2S setup
+    let (mut tx_buffer, tx_descriptors, _, _) = dma_buffers!(4 * 4092, 0);
+
+    let i2s_config = I2sConfig::new_tdm_philips()
+        // .with_sample_rate(Rate::from_hz(sample_rate))
+        .with_data_format(DataFormat::Data16Channel16);
+
+    let i2s = I2s::new(peripherals.I2S0, peripherals.DMA_CH2, i2s_config).unwrap();
+
+    let mut i2s_tx = i2s
+        .i2s_tx
+        .with_bclk(peripherals.GPIO13) // BCLK -> DAC's BCK
+        .with_ws(peripherals.GPIO14) // WS   -> DAC's LRCK/WS
+        .with_dout(peripherals.GPIO15) // DOUT -> DAC's DIN
+        .build(tx_descriptors);
 
     // Buttons
     let dial_down = Input::new(
