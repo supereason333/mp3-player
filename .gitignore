@@ -1,5 +1,6 @@
 # Rust / Cargo
-firmware/target/
+esp32-firmware/target/
+rp2350-firmware/target/
 
 # Embedded build artifacts
 *.elf
@@ -10,21 +11,25 @@ firmware/target/
 
 # Debug / probe output
 *.log
-firmware/probe-rs-log/
+esp32-firmware/probe-rs-log/
+rp2350-firmware/probe-rs-log/
 
 # macOS
 .DS_Store
 **/.DS_Store
 
 # Editor
-firmware/.vscode/
-firmware/.idea/
+esp32-firmware/.vscode/
+esp32-firmware/.idea/
+rp2350-firmware/.vscode/
+rp2350-firmware/.idea/
 *.swp
 *.swo
 *~
 
 # Environment / secrets
-firmware/.env
+rp2350-firmware/.env
+esp32-firmware/.env
 
 
 # KiCad hardware
