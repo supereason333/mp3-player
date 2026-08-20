@@ -10,9 +10,22 @@
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
-use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{clock::CpuClock, gpio};
 use panic_rtt_target as _;
+
+use esp_hal::{
+    delay::Delay,
+    dma::{DmaRxBuf, DmaTxBuf},
+    dma_buffers,
+    gpio::{Input, InputConfig, Level, Pull},
+    main,
+    spi::{
+        Mode,
+        master::{Config, Spi},
+    },
+    time::Rate,
+};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -39,11 +52,81 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Embassy initialized!");
 
-    // TODO: Spawn some tasks
     let _ = spawner;
 
+    // Set up Display SPI
+    let sclk = peripherals.GPIO1;
+    let mosi = peripherals.GPIO2;
+    let cs = peripherals.GPIO3;
+    let dma_channel = peripherals.DMA_CH0;
+
+    let (_, _, tx_buffer, tx_descriptors) = dma_buffers!(32000);
+    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+
+    let mut display_spi = Spi::new(
+        peripherals.SPI2,
+        Config::default()
+            .with_frequency(Rate::from_khz(100))
+            .with_mode(Mode::_0),
+    )
+    .unwrap()
+    .with_sck(sclk)
+    .with_mosi(mosi)
+    .with_cs(cs)
+    .with_dma(dma_channel)
+    .into_async();
+
+    // Set up SD card SPIcs(cs);
+    let sclk = peripherals.GPIO4;
+    let mosi = peripherals.GPIO5;
+    let miso = peripherals.GPIO6;
+    let cs = peripherals.GPIO7;
+    let dma_channel = peripherals.DMA_CH1;
+
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
+    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
+    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+
+    let mut display_spi = Spi::new(
+        peripherals.SPI3,
+        Config::default()
+            .with_frequency(Rate::from_khz(100))
+            .with_mode(Mode::_0),
+    )
+    .unwrap()
+    .with_sck(sclk)
+    .with_mosi(mosi)
+    .with_miso(miso)
+    .with_cs(cs)
+    .with_dma(dma_channel)
+    .with_buffers(dma_rx_buf, dma_tx_buf)
+    .into_async();
+
+    // Buttons
+    let dial_down = Input::new(
+        peripherals.GPIO8,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+    let dial_up = Input::new(
+        peripherals.GPIO9,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+    let dial_select = Input::new(
+        peripherals.GPIO10,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+    let btn_play = Input::new(
+        peripherals.GPIO11,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+    let btn_back = Input::new(
+        peripherals.GPIO12,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+
+    info!("Init finished!");
+
     loop {
-        info!("Hello world!");
         Timer::after(Duration::from_secs(1)).await;
     }
 
