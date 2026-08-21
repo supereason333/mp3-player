@@ -7,12 +7,14 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+mod input;
 mod sd;
 
 use defmt::info;
 use defmt_rtt as _;
 use esp_hal::gpio::{Output, OutputConfig};
-use panic_halt as _;
+// use panic_halt as _;
+use esp_backtrace as _;
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
@@ -33,6 +35,7 @@ use esp_hal::{
     time::Rate,
 };
 
+use crate::input::input_task;
 use crate::sd::sd_task::sd_task;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -150,6 +153,8 @@ async fn main(spawner: Spawner) -> ! {
     info!("Init finished!");
 
     _ = spawner.spawn(sd_task(sd_spi, sd_cs).unwrap());
+
+    _ = spawner.spawn(input_task(dial_up, dial_down, dial_select, btn_play, btn_back).unwrap());
 
     loop {
         Timer::after(Duration::from_secs(1)).await;
