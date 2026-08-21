@@ -1,5 +1,5 @@
 use defmt::*;
-// use defmt_rtt as _;
+use defmt_rtt as _;
 
 use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use esp_hal::time::Rate;

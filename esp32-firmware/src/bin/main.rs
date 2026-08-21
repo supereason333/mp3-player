@@ -11,13 +11,13 @@ mod sd;
 
 use defmt::info;
 use defmt_rtt as _;
+use esp_hal::gpio::{Output, OutputConfig};
 use panic_halt as _;
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{clock::CpuClock, gpio};
-// use panic_rtt_target as _;
 
 use esp_hal::{
     delay::Delay,
@@ -32,6 +32,8 @@ use esp_hal::{
     },
     time::Rate,
 };
+
+use crate::sd::sd_task::sd_task;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -57,8 +59,6 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
 
     info!("Embassy initialized!");
-
-    let _ = spawner;
 
     // Set up Display SPI
     let sclk = peripherals.GPIO1;
@@ -103,10 +103,11 @@ async fn main(spawner: Spawner) -> ! {
     .with_sck(sclk)
     .with_mosi(mosi)
     .with_miso(miso)
-    .with_cs(cs)
     .with_dma(dma_channel)
     .with_buffers(dma_rx_buf, dma_tx_buf)
     .into_async();
+
+    let sd_cs = Output::new(cs, Level::Low, OutputConfig::default());
 
     // I2S setup
     let (mut tx_buffer, tx_descriptors, _, _) = dma_buffers!(4 * 4092, 0);
@@ -148,9 +149,10 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Init finished!");
 
+    _ = spawner.spawn(sd_task(sd_spi, sd_cs).unwrap());
+
     loop {
         Timer::after(Duration::from_secs(1)).await;
     }
-
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.1.0/examples
 }
