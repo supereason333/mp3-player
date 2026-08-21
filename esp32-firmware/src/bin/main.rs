@@ -7,6 +7,8 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+mod sd;
+
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
@@ -88,7 +90,7 @@ async fn main(spawner: Spawner) -> ! {
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
-    let mut display_spi = Spi::new(
+    let mut sd_spi = Spi::new(
         peripherals.SPI3,
         Config::default()
             .with_frequency(Rate::from_khz(100))

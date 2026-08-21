@@ -16,6 +16,7 @@ esp-rtos = { version = "0.3.0", features = ["defmt", "embassy", "esp32s3"] }
 defmt                  = "1.0.1"
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["defmt", "esp32s3"] }
 
+embassy-futures = "0.1.2"
 embassy-executor = { version = "0.10.0", features = ["defmt"] }
 embassy-time     = { version = "0.5.0", features = ["defmt"] }
 panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
@@ -23,7 +24,11 @@ rtt-target       = { version = "0.6.2", features = ["defmt"] }
 
 critical-section = "1.2.0"
 static_cell      = "2.1.1"
+embassy-sync = "0.8.0"
+embedded-hal-bus = "0.2"
 
+embedded-sdmmc = "0.9.0"
+heapless = "0.9.3"
 
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
 [profile.dev]
