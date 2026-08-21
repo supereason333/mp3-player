@@ -10,11 +10,14 @@
 mod sd;
 
 use defmt::info;
+use defmt_rtt as _;
+use panic_halt as _;
+
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{clock::CpuClock, gpio};
-use panic_rtt_target as _;
+// use panic_rtt_target as _;
 
 use esp_hal::{
     delay::Delay,
@@ -43,7 +46,7 @@ async fn main(spawner: Spawner) -> ! {
     // generator version: 1.3.0
     // generator parameters: --chip esp32s3 -o unstable-hal -o embassy -o probe-rs -o defmt -o panic-rtt-target -o zed
 
-    rtt_target::rtt_init_defmt!();
+    // rtt_target::rtt_init_defmt!();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
@@ -93,7 +96,7 @@ async fn main(spawner: Spawner) -> ! {
     let mut sd_spi = Spi::new(
         peripherals.SPI3,
         Config::default()
-            .with_frequency(Rate::from_khz(100))
+            .with_frequency(Rate::from_khz(400))
             .with_mode(Mode::_0),
     )
     .unwrap()
