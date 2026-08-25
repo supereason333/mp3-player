@@ -7,9 +7,6 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-mod input;
-mod sd;
-
 use defmt::info;
 use defmt_rtt as _;
 use esp_hal::gpio::{Output, OutputConfig};
@@ -35,8 +32,8 @@ use esp_hal::{
     time::Rate,
 };
 
-use crate::input::input_task;
-use crate::sd::sd_task::sd_task;
+use esp32_mp3_player::input::input_task;
+use esp32_mp3_player::sd::sd_task::sd_task;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -67,10 +64,9 @@ async fn main(spawner: Spawner) -> ! {
     let sclk = peripherals.GPIO1;
     let mosi = peripherals.GPIO2;
     let cs = peripherals.GPIO3;
-    let dma_channel = peripherals.DMA_CH0;
 
-    let (_, _, tx_buffer, tx_descriptors) = dma_buffers!(32000);
-    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+    // let (_, _, tx_buffer, tx_descriptors) = dma_buffers!(32000);
+    // let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
     let mut display_spi = Spi::new(
         peripherals.SPI2,
@@ -82,7 +78,7 @@ async fn main(spawner: Spawner) -> ! {
     .with_sck(sclk)
     .with_mosi(mosi)
     .with_cs(cs)
-    .with_dma(dma_channel)
+    .with_dma(peripherals.DMA_CH0)
     .into_async();
 
     // Set up SD card SPIcs(cs);
