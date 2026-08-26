@@ -9,9 +9,8 @@
 
 use defmt::info;
 use defmt_rtt as _;
-use esp_hal::gpio::{Output, OutputConfig};
-// use panic_halt as _;
 use esp_backtrace as _;
+use esp_hal::gpio::{Output, OutputConfig};
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
@@ -49,8 +48,6 @@ async fn main(spawner: Spawner) -> ! {
     // generator version: 1.3.0
     // generator parameters: --chip esp32s3 -o unstable-hal -o embassy -o probe-rs -o defmt -o panic-rtt-target -o zed
 
-    // rtt_target::rtt_init_defmt!();
-
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
@@ -62,14 +59,12 @@ async fn main(spawner: Spawner) -> ! {
     info!("Embassy initialized!");
 
     // Set up Display SPI
-    let sclk = peripherals.GPIO1;
-    let mosi = peripherals.GPIO2;
-    let dc = Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());
-    let rst = Output::new(peripherals.GPIO16, Level::Low, OutputConfig::default());
-    let cs = Output::new(peripherals.GPIO17, Level::Low, OutputConfig::default());
-
-    // let (_, _, tx_buffer, tx_descriptors) = dma_buffers!(32000);
-    // let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
+    let blk = Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default());
+    let cs = Output::new(peripherals.GPIO20, Level::Low, OutputConfig::default());
+    let dc = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default());
+    let rst = Output::new(peripherals.GPIO47, Level::Low, OutputConfig::default());
+    let mosi = peripherals.GPIO48;
+    let sclk = peripherals.GPIO45;
 
     let display_spi = Spi::new(
         peripherals.SPI2,
@@ -85,10 +80,11 @@ async fn main(spawner: Spawner) -> ! {
     let disp = display::Display::new(display_spi, dc, rst, cs);
 
     // Set up SD card SPIcs(cs);
-    let sclk = peripherals.GPIO4;
-    let mosi = peripherals.GPIO5;
-    let miso = peripherals.GPIO6;
-    let cs = peripherals.GPIO7;
+    let miso = peripherals.GPIO8;
+    let mosi = peripherals.GPIO18;
+    let sclk = peripherals.GPIO17;
+    let cs = peripherals.GPIO16;
+
     let dma_channel = peripherals.DMA_CH1;
 
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
@@ -112,6 +108,10 @@ async fn main(spawner: Spawner) -> ! {
     let sd_cs = Output::new(cs, Level::Low, OutputConfig::default());
 
     // I2S setup
+    let lrck = peripherals.GPIO14;
+    let din = peripherals.GPIO13;
+    let bck = peripherals.GPIO12;
+
     let (i2s_tx_buffer, i2s_tx_descriptors, _, _) = dma_buffers!(4 * 4092, 0);
 
     let i2s_config = I2sConfig::new_tdm_philips()
@@ -124,30 +124,30 @@ async fn main(spawner: Spawner) -> ! {
 
     let i2s_tx = i2s
         .i2s_tx
-        .with_bclk(peripherals.GPIO13) // BCLK -> DAC's BCK
-        .with_ws(peripherals.GPIO14) // WS   -> DAC's LRCK/WS
-        .with_dout(peripherals.GPIO15) // DOUT -> DAC's DIN
+        .with_bclk(bck)
+        .with_ws(lrck)
+        .with_dout(din)
         .build(i2s_tx_descriptors);
 
     // Buttons
     let dial_down = Input::new(
-        peripherals.GPIO8,
+        peripherals.GPIO41,
         InputConfig::default().with_pull(Pull::Up),
     );
     let dial_up = Input::new(
-        peripherals.GPIO9,
+        peripherals.GPIO40,
         InputConfig::default().with_pull(Pull::Up),
     );
     let dial_select = Input::new(
-        peripherals.GPIO10,
+        peripherals.GPIO42,
         InputConfig::default().with_pull(Pull::Up),
     );
     let btn_play = Input::new(
-        peripherals.GPIO11,
+        peripherals.GPIO1,
         InputConfig::default().with_pull(Pull::Up),
     );
     let btn_back = Input::new(
-        peripherals.GPIO12,
+        peripherals.GPIO2,
         InputConfig::default().with_pull(Pull::Up),
     );
 
