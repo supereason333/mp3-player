@@ -18,6 +18,8 @@ use embassy_time::{Duration, Timer};
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{clock::CpuClock, gpio};
 
+use static_cell::StaticCell;
+
 use esp_hal::{
     delay::Delay,
     dma::{DmaRxBuf, DmaTxBuf},
@@ -32,7 +34,10 @@ use esp_hal::{
     time::Rate,
 };
 
+use esp32_mp3_player::dac;
+use esp32_mp3_player::display;
 use esp32_mp3_player::input::input_task;
+use esp32_mp3_player::screens;
 use esp32_mp3_player::sd::sd_task::sd_task;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -63,12 +68,14 @@ async fn main(spawner: Spawner) -> ! {
     // Set up Display SPI
     let sclk = peripherals.GPIO1;
     let mosi = peripherals.GPIO2;
-    let cs = peripherals.GPIO3;
+    let dc = Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());
+    let rst = Output::new(peripherals.GPIO16, Level::Low, OutputConfig::default());
+    let cs = Output::new(peripherals.GPIO17, Level::Low, OutputConfig::default());
 
     // let (_, _, tx_buffer, tx_descriptors) = dma_buffers!(32000);
     // let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
-    let mut display_spi = Spi::new(
+    let display_spi = Spi::new(
         peripherals.SPI2,
         Config::default()
             .with_frequency(Rate::from_khz(100))
@@ -77,9 +84,9 @@ async fn main(spawner: Spawner) -> ! {
     .unwrap()
     .with_sck(sclk)
     .with_mosi(mosi)
-    .with_cs(cs)
-    .with_dma(peripherals.DMA_CH0)
     .into_async();
+
+    let disp = display::Display::new(display_spi, dc, rst, cs);
 
     // Set up SD card SPIcs(cs);
     let sclk = peripherals.GPIO4;
@@ -92,7 +99,7 @@ async fn main(spawner: Spawner) -> ! {
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
-    let mut sd_spi = Spi::new(
+    let sd_spi = Spi::new(
         peripherals.SPI3,
         Config::default()
             .with_frequency(Rate::from_khz(400))
@@ -109,20 +116,22 @@ async fn main(spawner: Spawner) -> ! {
     let sd_cs = Output::new(cs, Level::Low, OutputConfig::default());
 
     // I2S setup
-    let (mut tx_buffer, tx_descriptors, _, _) = dma_buffers!(4 * 4092, 0);
+    let (i2s_tx_buffer, i2s_tx_descriptors, _, _) = dma_buffers!(4 * 4092, 0);
 
     let i2s_config = I2sConfig::new_tdm_philips()
         // .with_sample_rate(Rate::from_hz(sample_rate))
         .with_data_format(DataFormat::Data16Channel16);
 
-    let i2s = I2s::new(peripherals.I2S0, peripherals.DMA_CH2, i2s_config).unwrap();
+    let i2s = I2s::new(peripherals.I2S0, peripherals.DMA_CH2, i2s_config)
+        .unwrap()
+        .into_async();
 
-    let mut i2s_tx = i2s
+    let i2s_tx = i2s
         .i2s_tx
         .with_bclk(peripherals.GPIO13) // BCLK -> DAC's BCK
         .with_ws(peripherals.GPIO14) // WS   -> DAC's LRCK/WS
         .with_dout(peripherals.GPIO15) // DOUT -> DAC's DIN
-        .build(tx_descriptors);
+        .build(i2s_tx_descriptors);
 
     // Buttons
     let dial_down = Input::new(
@@ -148,9 +157,13 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Init finished!");
 
-    _ = spawner.spawn(sd_task(sd_spi, sd_cs).unwrap());
+    spawner.spawn(sd_task(sd_spi, sd_cs).unwrap());
 
-    _ = spawner.spawn(input_task(dial_up, dial_down, dial_select, btn_play, btn_back).unwrap());
+    spawner.spawn(input_task(dial_up, dial_down, dial_select, btn_play, btn_back).unwrap());
+
+    spawner.spawn(dac::dac_task(i2s_tx, i2s_tx_buffer).unwrap());
+
+    spawner.spawn(screens::screen_task::screen_task(disp).unwrap());
 
     loop {
         Timer::after(Duration::from_secs(1)).await;
