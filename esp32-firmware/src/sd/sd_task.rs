@@ -5,7 +5,6 @@ use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use esp_hal::time::Rate;
 use static_cell::StaticCell;
 
-use embassy_sync::pubsub::Error;
 use embedded_sdmmc::Directory;
 use heapless::Vec as HVec;
 
@@ -23,10 +22,9 @@ use embedded_sdmmc::{
 use esp_hal::Async;
 use esp_hal::gpio::Output;
 use esp_hal::spi::Mode;
-use esp_hal::spi::master::{Config, Spi, SpiDmaBus};
+use esp_hal::spi::master::{Config, SpiDmaBus};
 
 use embassy_time::Delay;
-use embassy_time::Instant;
 
 // Simple requests
 pub enum SdRequest {
@@ -196,8 +194,8 @@ async fn handle_ui_request<'a, D, T, const DIRS: usize, const FILES: usize, cons
 
             SD_RESPONSE.signal(SdResponse::DirListing(entries));
         }
-        SdRequest::ReadFile(path, name) => {
-            let mut buf: HVec<u8, 512> = HVec::new();
+        SdRequest::ReadFile(_path, _name) => {
+            let buf: HVec<u8, 512> = HVec::new();
             // let buf = [0u8; 512];
 
             // TEMPORARYLY NOT USED REMOVED, WRITE AGAIN LATER!
@@ -248,7 +246,7 @@ async fn handle_audio_request<'a, D, T, const DIRS: usize, const FILES: usize, c
                     match close(&mut state, volume_mgr) {
                         Ok(()) => {}                                // yay
                         Err(embedded_sdmmc::Error::BadHandle) => {} // Prob already closed
-                        Err(e) => {} // Otehr error i prob dont care about
+                        Err(_e) => {} // Otehr error i prob dont care about
                     }
                     // it should be dropped even if it errors because i said so
                 }
@@ -273,7 +271,7 @@ async fn handle_audio_request<'a, D, T, const DIRS: usize, const FILES: usize, c
         }
         AudioSdRequest::Close => {
             if let Some(mut state) = playback_state.take() {
-                if let Err(e) = close(&mut state, volume_mgr) {
+                if let Err(_e) = close(&mut state, volume_mgr) {
                     // Error
                     // TODO: Do something useful, propogate back to caller with signal?
                     // When like I write wrapper module with function wrappers for these signals
@@ -302,7 +300,7 @@ async fn handle_audio_request<'a, D, T, const DIRS: usize, const FILES: usize, c
                         }
                         AUDIO_FILLED.send(buf).await; // Hand off data to consumer
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         AUDIO_EMPTY.send(buf).await;
                         AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
                     }

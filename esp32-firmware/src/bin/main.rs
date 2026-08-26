@@ -15,18 +15,14 @@ use esp_backtrace as _;
 
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
+use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::{clock::CpuClock, gpio};
-
-use static_cell::StaticCell;
 
 use esp_hal::{
-    delay::Delay,
     dma::{DmaRxBuf, DmaTxBuf},
     dma_buffers,
     gpio::{Input, InputConfig, Level, Pull},
     i2s::master::{Config as I2sConfig, DataFormat, I2s},
-    main,
     spi::{
         Mode,
         master::{Config, Spi},

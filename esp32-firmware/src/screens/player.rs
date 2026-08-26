@@ -1,8 +1,6 @@
 use defmt::*;
 use defmt_rtt as _;
 
-use core::fmt::Write;
-
 use embedded_sdmmc::ShortFileName;
 
 use embedded_graphics::{
@@ -13,13 +11,9 @@ use embedded_graphics::{
 use crate::display::FbType;
 use crate::input::NavEvent;
 use crate::screens::browser::BrowserScreen;
-use crate::screens::{FileOpenerScreen, Screen, ScreenLogic, Transition};
+use crate::screens::{Screen, ScreenLogic, Transition};
 
-use crate::dac;
-use crate::sd::sd_task::{
-    AUDIO_SD_REQUEST, AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath, SD_REQUEST,
-    SdRequest, SdResponse,
-};
+use crate::sd::sd_task::{AUDIO_SD_RESPONSE, AudioSdResponse, DirPath};
 
 use crate::dac::{DAC_REQUEST, DacRequest};
 

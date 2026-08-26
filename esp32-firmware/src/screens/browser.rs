@@ -3,7 +3,6 @@ use defmt_rtt as _;
 
 use core::fmt::Write;
 
-use embedded_sdmmc::Error::NotFound;
 use heapless::String;
 use heapless::Vec as HVec;
 
@@ -13,7 +12,7 @@ use embedded_graphics::{
 };
 
 use crate::display::FbType;
-use crate::input::{NAV_EVENT, NavEvent};
+use crate::input::NavEvent;
 use crate::screens::cat::CatScreen;
 use crate::screens::player::PlayerScreen;
 // use crate::screens::dialogue::DialogueScreen;

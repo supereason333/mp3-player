@@ -4,19 +4,16 @@ use core::mem;
 
 use static_cell::StaticCell;
 
-use embassy_time::Instant;
-
-use embassy_futures::select::{Either, Either3, select, select3};
+use embassy_futures::select::{Either3, select3};
 
 use embassy_rp::peripherals::PIO0;
-use embassy_rp::pio_programs::i2s::{PioI2sOut, PioI2sOutProgram};
+use embassy_rp::pio_programs::i2s::PioI2sOut;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 
 use embedded_sdmmc::ShortFileName;
 
-use crate::dac;
 use crate::sd::sd_task::{
     AUDIO_CHUNK_BYTES, AUDIO_CHUNK_FRAMES, AUDIO_EMPTY, AUDIO_FILLED, AUDIO_SD_REQUEST,
     AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath,

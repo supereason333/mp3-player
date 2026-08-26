@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-mod bmp820;
 mod dac;
 mod decoder;
 mod display;
@@ -16,8 +15,6 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 use embassy_executor::Spawner;
-
-use embassy_time::Delay;
 
 // HAL Imports
 use embassy_rp::gpio::Level;
@@ -44,7 +41,6 @@ bind_interrupts!(struct Irqs {
 });
 
 const DISPLAY_FREQ: u32 = 32_000_000;
-const BMP280_ADDR: u8 = 0x76;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -52,15 +48,6 @@ async fn main(spawner: Spawner) {
     info!("[Main] Start");
     let _led_pin = gpio::Output::new(p.PIN_25, gpio::Level::High);
 
-    // Configure I2C
-    // let sda = p.PIN_20;
-    // let scl = p.PIN_21;
-    // let config = embassy_rp::i2c::Config::default();
-    // let bus: embassy_rp::i2c::I2c<I2C0, embassy_rp::i2c::Async> =
-    //     embassy_rp::i2c::I2c::new_async(p.I2C0, scl, sda, Irqs, config);
-    // let mut _bmp_280 = BMP280::new(bus, BMP280_ADDR).await;
-    // info!("I2C Configured");
-    // Build and take ownership of display
     let cs = Output::new(p.PIN_13, Level::Low);
     let dcx = Output::new(p.PIN_7, Level::High);
     let rst = Output::new(p.PIN_9, Level::High);

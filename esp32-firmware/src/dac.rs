@@ -1,5 +1,4 @@
 // dac.rs
-use core::mem;
 
 use defmt::*;
 use defmt_rtt as _;
