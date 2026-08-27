@@ -36,6 +36,7 @@ heapless = "0.9.3"
 
 embedded-graphics = "0.8"
 embedded-hal-async = "1.0.0"
+noise_perlin = "1.0.0"
 
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
 [profile.dev]

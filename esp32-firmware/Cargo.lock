@@ -881,6 +881,7 @@ dependencies = [
  "esp-hal",
  "esp-rtos",
  "heapless 0.9.3",
+ "noise_perlin",
  "static_cell",
 ]
 
@@ -1248,6 +1249,12 @@ name = "nb"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
+
+[[package]]
+name = "noise_perlin"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc5a415abdee7cd18c8a596ca2967acdf8b436bfa62028738e5da4870d3c6c69"
 
 [[package]]
 name = "nu-ansi-term"

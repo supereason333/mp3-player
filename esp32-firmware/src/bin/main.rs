@@ -59,12 +59,12 @@ async fn main(spawner: Spawner) -> ! {
     info!("Embassy initialized!");
 
     // Set up Display SPI
-    let blk = Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default());
-    let cs = Output::new(peripherals.GPIO20, Level::Low, OutputConfig::default());
-    let dc = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default());
-    let rst = Output::new(peripherals.GPIO47, Level::Low, OutputConfig::default());
-    let mosi = peripherals.GPIO48;
-    let sclk = peripherals.GPIO45;
+    let blk = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default());
+    let cs = Output::new(peripherals.GPIO47, Level::Low, OutputConfig::default());
+    let dc = Output::new(peripherals.GPIO48, Level::Low, OutputConfig::default());
+    let rst = Output::new(peripherals.GPIO38, Level::Low, OutputConfig::default());
+    let mosi = peripherals.GPIO2;
+    let sclk = peripherals.GPIO1;
 
     let display_spi = Spi::new(
         peripherals.SPI2,
@@ -80,10 +80,10 @@ async fn main(spawner: Spawner) -> ! {
     let disp = display::Display::new(display_spi, dc, rst, cs);
 
     // Set up SD card SPIcs(cs);
-    let miso = peripherals.GPIO8;
-    let mosi = peripherals.GPIO18;
-    let sclk = peripherals.GPIO17;
-    let cs = peripherals.GPIO16;
+    let miso = peripherals.GPIO11;
+    let mosi = peripherals.GPIO10;
+    let sclk = peripherals.GPIO9;
+    let cs = peripherals.GPIO8;
 
     let dma_channel = peripherals.DMA_CH1;
 
@@ -131,23 +131,23 @@ async fn main(spawner: Spawner) -> ! {
 
     // Buttons
     let dial_down = Input::new(
-        peripherals.GPIO41,
+        peripherals.GPIO6,
         InputConfig::default().with_pull(Pull::Up),
     );
     let dial_up = Input::new(
-        peripherals.GPIO40,
+        peripherals.GPIO7,
         InputConfig::default().with_pull(Pull::Up),
     );
     let dial_select = Input::new(
-        peripherals.GPIO42,
+        peripherals.GPIO15,
         InputConfig::default().with_pull(Pull::Up),
     );
     let btn_play = Input::new(
-        peripherals.GPIO1,
+        peripherals.GPIO4,
         InputConfig::default().with_pull(Pull::Up),
     );
     let btn_back = Input::new(
-        peripherals.GPIO2,
+        peripherals.GPIO5,
         InputConfig::default().with_pull(Pull::Up),
     );
 
