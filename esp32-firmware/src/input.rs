@@ -13,6 +13,7 @@ use embassy_time::Timer;
 
 pub static NAV_EVENT: Signal<CriticalSectionRawMutex, NavEvent> = Signal::new();
 
+#[derive(defmt::Format)]
 pub enum NavEvent {
     Up,
     Down,
