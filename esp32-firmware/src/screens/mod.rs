@@ -7,7 +7,7 @@ pub mod settings;
 
 use embedded_sdmmc::ShortFileName;
 
-use crate::{display::FbType, input::NavEvent, sd::sd_task::DirPath};
+use crate::{display::FbType, input::NavEvent, sd::DirPath};
 
 pub enum Transition {
     Stay,

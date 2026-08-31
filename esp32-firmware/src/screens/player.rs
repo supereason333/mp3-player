@@ -13,7 +13,7 @@ use crate::input::NavEvent;
 use crate::screens::browser::BrowserScreen;
 use crate::screens::{Screen, ScreenLogic, Transition};
 
-use crate::sd::sd_task::{AUDIO_SD_RESPONSE, AudioSdResponse, DirPath};
+use crate::sd::{AUDIO_SD_RESPONSE, AudioSdResponse, DirPath};
 
 use crate::dac::{DAC_REQUEST, DacRequest};
 

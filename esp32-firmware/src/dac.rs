@@ -13,10 +13,7 @@ use embedded_sdmmc::ShortFileName;
 use esp_hal::Async;
 use esp_hal::i2s::master::I2sTx;
 
-use crate::sd::sd_task::{
-    AUDIO_CHUNK_BYTES, AUDIO_CHUNK_FRAMES, AUDIO_EMPTY, AUDIO_FILLED, AUDIO_SD_REQUEST,
-    AUDIO_SD_RESPONSE, AudioSdRequest, AudioSdResponse, DirPath,
-};
+use crate::sd::*;
 
 pub static DAC_REQUEST: Signal<CriticalSectionRawMutex, DacRequest> = Signal::new();
 

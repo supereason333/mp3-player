@@ -14,7 +14,7 @@ use crate::display::FbType;
 use crate::input::NavEvent;
 use crate::screens::browser::BrowserScreen;
 use crate::screens::{FileOpenerScreen, Screen, ScreenLogic, Transition};
-use crate::sd::sd_task::{DirPath, SD_REQUEST, SD_RESPONSE, SdRequest, SdResponse};
+use crate::sd::*;
 
 pub struct CatScreen {
     opened_path: DirPath,
