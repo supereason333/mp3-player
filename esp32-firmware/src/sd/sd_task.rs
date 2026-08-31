@@ -106,19 +106,46 @@ impl TimeSource for DummyTimesource {
 #[embassy_executor::task]
 pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>) -> ! {
     info!("[SD] SD task spawned");
+    let mut volume_mgr = match set_up_sd(spi_device, cs) {
+        Ok(card) => Some(VolumeManager::new(card, DummyTimesource::default())),
+        Err(_e) => None,
+    };
+
+    let mut playback: Option<AudioPlaybackState> = None;
+
+    // DOuble static buffer setup
+    let buf0 = AUDIO_BUF_0.init([0u8; AUDIO_CHUNK_BYTES]);
+    let buf1 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
+    AUDIO_EMPTY.try_send(buf0).ok();
+    AUDIO_EMPTY.try_send(buf1).ok();
+
+    loop {
+        match (
+            &mut volume_mgr,
+            select(AUDIO_SD_REQUEST.receive(), SD_REQUEST.receive()).await,
+        ) {
+            (Some(vm), Either::First(req)) => handle_audio_request(req, vm, &mut playback).await,
+            (None, Either::First(req)) => empty_handle_audio(req).await,
+            (Some(vm), Either::Second(req)) => handle_ui_request(req, vm).await,
+            (None, Either::Second(req)) => empty_handle_ui(req).await,
+        }
+    }
+}
+
+fn set_up_sd(
+    spi_device: SpiDmaBus<'static, Async>,
+    cs: Output<'static>,
+) -> Result<
+    SdCard<ExclusiveDevice<SpiDmaBus<'static, Async>, Output<'static>, NoDelay>, Delay>,
+    embedded_sdmmc::sdcard::Error,
+> {
     let exclusive_device = match ExclusiveDevice::new_no_delay(spi_device, cs) {
         Ok(device) => device,
         Err(_e) => defmt::panic!("Failed to get exclusive device"),
     };
     let sdcard = SdCard::new(exclusive_device, Delay);
 
-    let sd_size = match sdcard.num_bytes() {
-        Ok(size) => size,
-        Err(e) => defmt::panic!(
-            "Failed to get SD card size (Is card connected?) Error: {}",
-            Debug2Format(&e)
-        ),
-    };
+    let sd_size = sdcard.num_bytes()?;
     info!("[SD] card size is {} bytes", sd_size);
 
     sdcard
@@ -131,28 +158,19 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
             )
         })
         .unwrap();
+    Ok(sdcard)
+}
 
-    let volume_mgr = VolumeManager::new(sdcard, DummyTimesource::default());
-
-    let mut playback: Option<AudioPlaybackState> = None;
-
-    // DOuble static buffer setup
-    let buf0 = AUDIO_BUF_0.init([0u8; AUDIO_CHUNK_BYTES]);
-    let buf1 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
-    AUDIO_EMPTY.try_send(buf0).ok();
-    AUDIO_EMPTY.try_send(buf1).ok();
-
-    loop {
-        if let Ok(req) = AUDIO_SD_REQUEST.try_receive() {
-            handle_audio_request(req, &volume_mgr, &mut playback).await;
-            continue;
+// Basicaly if SD card does not exist it just returns empty shit
+async fn empty_handle_ui(request: SdRequest) {
+    match request {
+        SdRequest::ListDir(_) => {
+            let empty: DirListing = HVec::new();
+            SD_RESPONSE.signal(SdResponse::DirListing(empty));
         }
-
-        match select(AUDIO_SD_REQUEST.receive(), SD_REQUEST.receive()).await {
-            Either::First(request) => {
-                handle_audio_request(request, &volume_mgr, &mut playback).await
-            }
-            Either::Second(request) => handle_ui_request(request, &volume_mgr).await,
+        SdRequest::ReadFile(_, _) => {
+            let empty: HVec<u8, 512> = HVec::new();
+            SD_RESPONSE.signal(SdResponse::FileContents(empty));
         }
     }
 }
@@ -166,7 +184,7 @@ async fn handle_ui_request<'a, D, T, const DIRS: usize, const FILES: usize, cons
 {
     match request {
         SdRequest::ListDir(path) => {
-            let mut entries: HVec<(ShortFileName, u32, bool), 32> = HVec::new();
+            let mut entries: DirListing = HVec::new();
             let volume = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
             let root = volume.open_root_dir().unwrap();
             let directory = open_dir_path(volume_mgr, root, &path).unwrap();
@@ -205,6 +223,14 @@ async fn handle_ui_request<'a, D, T, const DIRS: usize, const FILES: usize, cons
 
             SD_RESPONSE.signal(SdResponse::FileContents(buf));
         }
+    }
+}
+
+async fn empty_handle_audio(request: AudioSdRequest) {
+    match request {
+        AudioSdRequest::Close => {}
+        AudioSdRequest::Open(_, _) => {}
+        AudioSdRequest::ReadChunk => {}
     }
 }
 
