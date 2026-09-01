@@ -13,14 +13,12 @@ use crate::input::NavEvent;
 use crate::screens::browser::BrowserScreen;
 use crate::screens::{Screen, ScreenLogic, Transition};
 
+use crate::dac::client::*;
 use crate::sd::DirPath;
-
-use crate::dac::{DAC_REQUEST, DacRequest};
 
 pub struct PlayerScreen {
     opened_path: DirPath,
     opened_file: ShortFileName,
-    status: heapless::String<32>,
 }
 
 impl PlayerScreen {
@@ -28,7 +26,6 @@ impl PlayerScreen {
         Self {
             opened_file: file,
             opened_path: path,
-            status: heapless::String::new(),
         }
     }
 }
@@ -38,7 +35,10 @@ impl ScreenLogic for PlayerScreen {
         match event {
             NavEvent::Select => {
                 info!("[Player] Send DAC request stop signal");
-                DAC_REQUEST.signal(DacRequest::Stop);
+                match end_playback().await {
+                    Ok(()) => {}
+                    Err(e) => error!("Could not end DAC playback: {}", e),
+                }
                 Transition::GoTo(Screen::Browser(BrowserScreen::new_with_path(
                     self.opened_path.clone(),
                 )))
@@ -48,11 +48,10 @@ impl ScreenLogic for PlayerScreen {
     }
 
     async fn on_enter(&mut self) {
-        let _ = self.status.push_str("Opening...");
-        DAC_REQUEST.signal(DacRequest::Start(
-            self.opened_path.clone(),
-            self.opened_file.clone(),
-        ))
+        match start_playback(self.opened_path.clone(), self.opened_file.clone()).await {
+            Ok(()) => {}
+            Err(e) => error!("Could not start DAC playback: {}", e),
+        };
     }
 
     fn draw(&self, fb: &mut FbType) {
@@ -64,9 +63,6 @@ impl ScreenLogic for PlayerScreen {
         };
 
         Text::new(filename_text, Point::new(0, 6), style)
-            .draw(fb)
-            .unwrap();
-        Text::new(&self.status, Point::new(0, 16), style)
             .draw(fb)
             .unwrap();
     }

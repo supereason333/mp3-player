@@ -41,12 +41,12 @@ type SdError = embedded_sdmmc::Error<<SdBlockDevice as embedded_sdmmc::BlockDevi
 
 // UI stuff
 // Simple requests
-pub enum SdRequest {
+enum SdRequest {
     ListDir(DirPath),
     ReadFile(DirPath, ShortFileName), // whole-file read, capped size, for text/hex viewers
 }
 
-pub enum SdResponse {
+enum SdResponse {
     DirListing(DirListing),
     FileContents(HVec<u8, 512>),
 }

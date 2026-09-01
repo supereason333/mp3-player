@@ -1,4 +1,5 @@
 // dac.rs
+pub mod client;
 
 use defmt::*;
 use defmt_rtt as _;
@@ -16,19 +17,34 @@ use esp_hal::i2s::master::I2sTx;
 use crate::sd::DirPath;
 use crate::sd::client::*;
 
-pub static DAC_REQUEST: Signal<CriticalSectionRawMutex, DacRequest> = Signal::new();
+static DAC_REQUEST: Signal<CriticalSectionRawMutex, DacRequest> = Signal::new();
+static DAC_RESPONSE: Signal<CriticalSectionRawMutex, DacResponse> = Signal::new();
 
-pub enum DacRequest {
+enum DacRequest {
     Start(DirPath, ShortFileName),
     Play,
     Pause,
     Stop,
 }
 
+#[derive(defmt::Format)]
+pub enum DacError {
+    NoAudioLoaded,
+    CantOpenFile,
+    AlreadyPlaying,
+    UnknownResponse,
+}
+
+enum DacResponse {
+    Opened,
+    Closed,
+    Error(DacError),
+}
+
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const BIT_DEPTH: u32 = 16;
 
-pub const DMA_BUFFER_SIZE: usize = 4 * 4092;
+const DMA_BUFFER_SIZE: usize = 4 * 4092;
 
 const I2S_CHUNK_BYTES: usize = crate::sd::AUDIO_CHUNK_FRAMES * 4;
 
@@ -48,9 +64,12 @@ pub async fn dac_task(
         let (path, name) = loop {
             match DAC_REQUEST.wait().await {
                 DacRequest::Start(path, name) => break (path, name),
-                _ => {} // ignore Play/Pause/Stop while idle
+                _ => {
+                    DAC_RESPONSE.signal(DacResponse::Error(DacError::NoAudioLoaded));
+                }
             }
         };
+        DAC_RESPONSE.signal(DacResponse::Opened);
 
         match audio_open(path, name).await {
             Ok((data_offset, data_size)) => {
@@ -60,7 +79,7 @@ pub async fn dac_task(
                 );
             }
             Err(()) => {
-                error!("[DAC] failed to open file (no card, or read error)");
+                error!("[DAC] Cant open file!");
                 continue;
             }
         }
@@ -68,7 +87,7 @@ pub async fn dac_task(
         // Prime the first chunk before starting the DMA transfer.
         let pending_chunk = match audio_read_chunk().await {
             Ok(chunk) => chunk,
-            Err(()) => {
+            Err(_e) => {
                 error!("[DAC] no data on first read, aborting playback");
                 audio_close().await.ok();
                 continue;
@@ -78,9 +97,13 @@ pub async fn dac_task(
         pcm_bytes_to_i2s_bytes(pending_chunk, scratch);
         return_audio_chunk(pending_chunk).await;
 
-        let mut transfer = i2s_tx
-            .write_dma_circular(tx_buffer)
-            .expect("failed to start I2S DMA transfer");
+        let mut transfer = match i2s_tx.write_dma_circular(tx_buffer) {
+            Ok(t) => t,
+            Err(e) => {
+                error!("failed to start I2S DMA transfer");
+                continue;
+            }
+        };
 
         let mut pending_offset = 0usize;
         let mut chunk_requested = false;
@@ -89,12 +112,17 @@ pub async fn dac_task(
             // Check for stop/new-start requests.
             if let Some(req) = DAC_REQUEST.try_take() {
                 match req {
-                    DacRequest::Start(_, _) | DacRequest::Stop => {
-                        info!("[DAC] Stop/new-Start received, ending playback");
+                    DacRequest::Stop => {
+                        DAC_RESPONSE.signal(DacResponse::Closed);
                         audio_close().await.ok();
                         break 'playback;
                     }
-                    DacRequest::Pause | DacRequest::Play => {}
+                    DacRequest::Start(_, _) => {
+                        DAC_RESPONSE.signal(DacResponse::Error(DacError::AlreadyPlaying))
+                    }
+                    DacRequest::Pause | DacRequest::Play => {
+                        defmt::panic!("PAUSE PLAY NOT IMPLIMENTED!"); // TODO: PAUSE PLAY
+                    }
                 }
             }
 

@@ -2,6 +2,14 @@
 use super::*;
 use embassy_futures::select::{Either, select};
 
+pub enum SdError {
+    Generic,
+    AudioGeneric,
+    AudioEofReached,
+    AudioFileNotOpen,
+    UiGeneric,
+}
+
 // Audio stuff
 
 pub async fn audio_open(path: DirPath, name: ShortFileName) -> Result<(u32, u32), ()> {
@@ -25,20 +33,25 @@ pub async fn audio_close() -> Result<(), ()> {
     }
 }
 
-pub async fn audio_read_chunk() -> Result<AudioChunk, ()> {
+pub async fn audio_read_chunk() -> Result<AudioChunk, SdError> {
     AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
 
     match select(AUDIO_FILLED.receive(), AUDIO_SD_RESPONSE.wait()).await {
         Either::First(chunk) => Ok(chunk),
-        Either::Second(_response) => Err(()), // Eof or Error
+        Either::Second(response) => match response {
+            AudioSdResponse::Eof => Err(SdError::AudioEofReached),
+            AudioSdResponse::Closed => Err(SdError::AudioFileNotOpen),
+            AudioSdResponse::Error => Err(SdError::AudioGeneric),
+            _ => Err(SdError::Generic),
+        },
     }
 }
 
-pub async fn return_audio_chunk(chunk: AudioChunk) -> Result<(), ()> {
+pub async fn return_audio_chunk(chunk: AudioChunk) {
     AUDIO_EMPTY.send(chunk).await;
-    Ok(())
 }
 
+// non blocking varient for getting chunks needed by DAC
 pub async fn audio_request_chunk() {
     AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
 }
