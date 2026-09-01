@@ -59,17 +59,17 @@ async fn main(spawner: Spawner) -> ! {
     info!("Embassy initialized!");
 
     // Set up Display SPI
-    let blk = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default());
-    let cs = Output::new(peripherals.GPIO47, Level::Low, OutputConfig::default());
-    let dc = Output::new(peripherals.GPIO48, Level::Low, OutputConfig::default());
-    let rst = Output::new(peripherals.GPIO38, Level::Low, OutputConfig::default());
+    let blk = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
+    let cs = Output::new(peripherals.GPIO47, Level::High, OutputConfig::default());
+    let dc = Output::new(peripherals.GPIO48, Level::High, OutputConfig::default());
+    let rst = Output::new(peripherals.GPIO38, Level::High, OutputConfig::default());
     let mosi = peripherals.GPIO2;
     let sclk = peripherals.GPIO1;
 
     let display_spi = Spi::new(
         peripherals.SPI2,
         Config::default()
-            .with_frequency(Rate::from_khz(100))
+            .with_frequency(Rate::from_mhz(15))
             .with_mode(Mode::_0),
     )
     .unwrap()
@@ -77,7 +77,9 @@ async fn main(spawner: Spawner) -> ! {
     .with_mosi(mosi)
     .into_async();
 
-    let disp = display::Display::new(display_spi, dc, rst, cs);
+    let mut disp = display::Display::new(display_spi, dc, rst, cs);
+
+    disp.init_display().await;
 
     // Set up SD card SPIcs(cs);
     let miso = peripherals.GPIO11;

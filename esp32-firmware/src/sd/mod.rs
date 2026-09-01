@@ -104,10 +104,17 @@ impl TimeSource for DummyTimesource {
 #[embassy_executor::task]
 pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>) -> ! {
     info!("[SD] SD task spawned");
-    let mut volume_mgr = match set_up_sd(spi_device, cs) {
-        Ok(card) => Some(VolumeManager::new(card, DummyTimesource::default())),
-        Err(_e) => None,
-    };
+
+    // let mut volume_mgr = match set_up_sd(spi_device, cs).await {
+    //     Ok(card) => Some(VolumeManager::new(card, DummyTimesource::default())),
+    //     Err(_e) => None,
+    // };
+    let mut volume_mgr: Option<
+        VolumeManager<
+            SdCard<ExclusiveDevice<SpiDmaBus<'static, Async>, Output<'static>, NoDelay>, Delay>,
+            DummyTimesource,
+        >,
+    > = None; // NO SD CARD OVERRIDE, REMOVE WHEN CARD INSERTED
 
     let mut playback: Option<AudioPlaybackState> = None;
 
@@ -116,7 +123,6 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
     let buf1 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
     AUDIO_EMPTY.try_send(buf0).ok();
     AUDIO_EMPTY.try_send(buf1).ok();
-
     loop {
         match (
             &mut volume_mgr,
@@ -130,7 +136,7 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
     }
 }
 
-fn set_up_sd(
+async fn set_up_sd(
     spi_device: SpiDmaBus<'static, Async>,
     cs: Output<'static>,
 ) -> Result<

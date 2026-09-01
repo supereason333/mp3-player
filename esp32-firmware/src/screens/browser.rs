@@ -50,11 +50,11 @@ impl ScreenLogic for BrowserScreen {
         self.entries = match ui_list_dir(self.path.clone()).await {
             Ok(entries) => entries,
             Err(()) => {
-                error!("[Browser] Got FileContents when expecting DirListing");
+                error!("[Browser] Could not list dir");
                 HVec::new()
             }
         };
-        info!("[Browser] Recieved Sd Response");
+        info!("[Browser] Recieved directory list");
         self.selected_index = 0;
     }
 
@@ -127,6 +127,8 @@ impl ScreenLogic for BrowserScreen {
     async fn on_close(&mut self) {}
 
     fn draw(&self, fb: &mut FbType) {
+        fb.set_pixel(Point { x: 10, y: 100 }, Rgb565::GREEN);
+        fb.set_pixel(Point { x: 11, y: 100 }, Rgb565::GREEN);
         for (i, (name, _size, is_dir)) in self.entries.iter().enumerate() {
             let style;
             if i == self.selected_index {

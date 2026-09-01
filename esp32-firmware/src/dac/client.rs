@@ -23,14 +23,8 @@ pub async fn end_playback() -> Result<(), DacError> {
     DAC_REQUEST.signal(DacRequest::Stop);
     match DAC_RESPONSE.wait().await {
         DacResponse::Closed => Ok(()),
-        DacResponse::Error(e) => {
-            // error!("[DAC] Could not stop playback: {}", e);
-            Err(e)
-        }
-        _ => {
-            // error!("[DAC] Unknown response");
-            Err(DacError::UnknownResponse)
-        }
+        DacResponse::Error(e) => Err(e),
+        _ => Err(DacError::UnknownResponse),
     }
 }
 
