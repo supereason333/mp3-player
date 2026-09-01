@@ -17,6 +17,7 @@ use crate::screens::cat::CatScreen;
 use crate::screens::player::PlayerScreen;
 use crate::screens::{Screen, ScreenLogic, Transition};
 
+use crate::sd::client::*;
 use crate::sd::*;
 
 #[derive(Clone)]
@@ -46,12 +47,11 @@ impl BrowserScreen {
 impl ScreenLogic for BrowserScreen {
     async fn on_enter(&mut self) {
         info!("[Browser] Send SdRequest");
-        SD_REQUEST.send(SdRequest::ListDir(self.path.clone())).await;
-        self.entries = match SD_RESPONSE.wait().await {
-            SdResponse::DirListing(entries) => entries,
-            SdResponse::FileContents(_) => {
+        self.entries = match ui_list_dir(self.path.clone()).await {
+            Ok(entries) => entries,
+            Err(()) => {
                 error!("[Browser] Got FileContents when expecting DirListing");
-                HVec::new() // degrade to empty listing rather than crashing
+                HVec::new()
             }
         };
         info!("[Browser] Recieved Sd Response");
@@ -94,14 +94,14 @@ impl ScreenLogic for BrowserScreen {
                             .unwrap();
                     }
                     info!("[Browser] Send SdRequest");
-                    SD_REQUEST.send(SdRequest::ListDir(self.path.clone())).await;
-                    self.entries = match SD_RESPONSE.wait().await {
-                        SdResponse::DirListing(entries) => entries,
-                        SdResponse::FileContents(_) => {
+                    self.entries = match ui_list_dir(self.path.clone()).await {
+                        Ok(entries) => entries,
+                        Err(()) => {
                             error!("[Browser] Got FileContents when expecting DirListing");
-                            HVec::new() // degrade to empty listing rather than crashing
+                            HVec::new()
                         }
                     };
+
                     info!("[Browser] Recieved Sd Response");
                     self.selected_index = 0;
                 } else {
@@ -147,19 +147,6 @@ impl ScreenLogic for BrowserScreen {
             Text::new(name, Point::new(0, 8 * i as i32 + 6), style)
                 .draw(fb)
                 .unwrap();
-
-            // info!("File {}", name);
-
-            // let style = PrimitiveStyleBuilder::new()
-            //     .stroke_color(Rgb565::CSS_DARK_SLATE_GRAY)
-            //     .stroke_width(3)
-            //     .fill_color(Rgb565::CSS_DARK_GRAY)
-            //     .build();
-
-            // Rectangle::new(Point::new(1, 1), Size::new(126, 158))
-            //     .into_styled(style)
-            //     .draw(&mut fb)
-            //     .unwrap();
         }
     }
 }

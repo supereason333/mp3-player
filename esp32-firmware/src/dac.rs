@@ -13,7 +13,8 @@ use embedded_sdmmc::ShortFileName;
 use esp_hal::Async;
 use esp_hal::i2s::master::I2sTx;
 
-use crate::sd::*;
+use crate::sd::DirPath;
+use crate::sd::client::*;
 
 pub static DAC_REQUEST: Signal<CriticalSectionRawMutex, DacRequest> = Signal::new();
 
@@ -27,74 +28,77 @@ pub enum DacRequest {
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const BIT_DEPTH: u32 = 16;
 
-// Shared with main.rs so both sides agree on the exact array type.
 pub const DMA_BUFFER_SIZE: usize = 4 * 4092;
 
-const I2S_CHUNK_BYTES: usize = AUDIO_CHUNK_FRAMES * 4;
+const I2S_CHUNK_BYTES: usize = crate::sd::AUDIO_CHUNK_FRAMES * 4;
 
 static I2S_SCRATCH: StaticCell<[u8; I2S_CHUNK_BYTES]> = StaticCell::new();
 
 #[embassy_executor::task]
 pub async fn dac_task(
     mut i2s_tx: I2sTx<'static, Async>,
-    tx_buffer: &'static mut [u8; DMA_BUFFER_SIZE], // <-- fixed-size array reference, Sized
+    tx_buffer: &'static mut [u8; DMA_BUFFER_SIZE],
 ) {
     info!("[DAC] DAC task spawned");
 
     let scratch: &'static mut [u8; I2S_CHUNK_BYTES] = I2S_SCRATCH.init([0u8; I2S_CHUNK_BYTES]);
 
     loop {
+        // Wait for a Start request, opening the file via the SD client.
         let (path, name) = loop {
             match DAC_REQUEST.wait().await {
-                DacRequest::Start(path, name) => {
-                    AUDIO_SD_REQUEST
-                        .send(AudioSdRequest::Open(path.clone(), name.clone()))
-                        .await;
-                    match AUDIO_SD_RESPONSE.wait().await {
-                        AudioSdResponse::Opened { data_size, .. } => {
-                            info!("[DAC] opened, {} bytes", data_size);
-                            break (path, name);
-                        }
-                        _ => {
-                            error!("[DAC] failed to open file");
-                            continue;
-                        }
-                    }
-                }
-                _ => {}
+                DacRequest::Start(path, name) => break (path, name),
+                _ => {} // ignore Play/Pause/Stop while idle
             }
         };
-        let _ = (path, name);
+
+        match audio_open(path, name).await {
+            Ok((data_offset, data_size)) => {
+                info!(
+                    "[DAC] opened, {} bytes of PCM data at offset {}",
+                    data_size, data_offset
+                );
+            }
+            Err(()) => {
+                error!("[DAC] failed to open file (no card, or read error)");
+                continue;
+            }
+        }
+
+        // Prime the first chunk before starting the DMA transfer.
+        let pending_chunk = match audio_read_chunk().await {
+            Ok(chunk) => chunk,
+            Err(()) => {
+                error!("[DAC] no data on first read, aborting playback");
+                audio_close().await.ok();
+                continue;
+            }
+        };
+
+        pcm_bytes_to_i2s_bytes(pending_chunk, scratch);
+        return_audio_chunk(pending_chunk).await;
 
         let mut transfer = i2s_tx
             .write_dma_circular(tx_buffer)
             .expect("failed to start I2S DMA transfer");
 
-        AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
-        let mut pending_chunk = AUDIO_FILLED.receive().await;
-        AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
-
-        pcm_bytes_to_i2s_bytes(pending_chunk, scratch);
-        AUDIO_EMPTY.send(pending_chunk).await;
-
         let mut pending_offset = 0usize;
-        let mut stop_playback = false;
+        let mut chunk_requested = false;
 
-        loop {
+        'playback: loop {
+            // Check for stop/new-start requests.
             if let Some(req) = DAC_REQUEST.try_take() {
                 match req {
                     DacRequest::Start(_, _) | DacRequest::Stop => {
                         info!("[DAC] Stop/new-Start received, ending playback");
-                        AUDIO_SD_REQUEST.send(AudioSdRequest::Close).await;
-                        stop_playback = true;
+                        audio_close().await.ok();
+                        break 'playback;
                     }
                     DacRequest::Pause | DacRequest::Play => {}
                 }
             }
-            if stop_playback {
-                break;
-            }
 
+            // Service the DMA transfer.
             match transfer.available() {
                 Ok(avail) if avail > 0 && pending_offset < scratch.len() => {
                     let remaining = scratch.len() - pending_offset;
@@ -122,42 +126,39 @@ pub async fn dac_task(
                 _ => {}
             }
 
+            // Scratch buffer exhausted — kick off/poll the next chunk.
             if pending_offset >= scratch.len() {
-                if let Ok(buf) = AUDIO_FILLED.try_receive() {
-                    pending_chunk = buf;
-                    pcm_bytes_to_i2s_bytes(pending_chunk, scratch);
-                    AUDIO_EMPTY.send(pending_chunk).await;
-                    pending_offset = 0;
-                    AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+                if !chunk_requested {
+                    audio_request_chunk().await;
+                    chunk_requested = true;
                 }
-            }
 
-            if let Some(resp) = AUDIO_SD_RESPONSE.try_take() {
-                match resp {
-                    AudioSdResponse::Eof => {
-                        info!("[DAC] Playback ended");
-                        AUDIO_SD_REQUEST.send(AudioSdRequest::Close).await;
-                        break;
+                if let Some(result) = audio_poll_chunk() {
+                    chunk_requested = false;
+                    match result {
+                        Ok(chunk) => {
+                            pcm_bytes_to_i2s_bytes(chunk, scratch);
+                            return_audio_chunk(chunk).await;
+                            pending_offset = 0;
+                        }
+                        Err(()) => {
+                            info!("[DAC] playback ended (EOF or read error)");
+                            audio_close().await.ok();
+                            break 'playback;
+                        }
                     }
-                    AudioSdResponse::Error => {
-                        error!("[DAC] Playback error");
-                        AUDIO_SD_REQUEST.send(AudioSdRequest::Close).await;
-                        break;
-                    }
-                    _ => {}
                 }
             }
 
             Timer::after(Duration::from_millis(2)).await;
         }
-
-        while let Ok(buf) = AUDIO_FILLED.try_receive() {
-            AUDIO_EMPTY.send(buf).await;
-        }
     }
 }
 
-fn pcm_bytes_to_i2s_bytes(bytes: &[u8; AUDIO_CHUNK_BYTES], out: &mut [u8; I2S_CHUNK_BYTES]) {
+fn pcm_bytes_to_i2s_bytes(
+    bytes: &[u8; crate::sd::AUDIO_CHUNK_BYTES],
+    out: &mut [u8; I2S_CHUNK_BYTES],
+) {
     for (i, chunk) in bytes.chunks_exact(2).enumerate() {
         let out_idx = i * 4;
         out[out_idx..out_idx + 2].copy_from_slice(chunk);

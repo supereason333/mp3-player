@@ -56,30 +56,30 @@ pub const AUDIO_CHUNK_BYTES: usize = 1024 * 8;
 pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 2;
 
 // Static buffers for audio
-pub static AUDIO_BUF_0: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
-pub static AUDIO_BUF_1: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
+static AUDIO_BUF_0: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
+static AUDIO_BUF_1: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
 
-pub static AUDIO_FILLED: Channel<CriticalSectionRawMutex, AudioChunk, 2> = Channel::new();
-pub static AUDIO_EMPTY: Channel<CriticalSectionRawMutex, AudioChunk, 2> = Channel::new();
+static AUDIO_FILLED: Channel<CriticalSectionRawMutex, AudioChunk, 2> = Channel::new();
+static AUDIO_EMPTY: Channel<CriticalSectionRawMutex, AudioChunk, 2> = Channel::new();
 
-pub enum AudioSdRequest {
+enum AudioSdRequest {
     Open(DirPath, ShortFileName),
     ReadChunk,
     Close,
 }
 
-pub enum AudioSdResponse {
+enum AudioSdResponse {
     Opened { data_offset: u32, data_size: u32 }, // offset/size of the PCM data chunk, after header
     Eof,
     Error,
     Closed,
 }
 
-pub static AUDIO_SD_REQUEST: Channel<CriticalSectionRawMutex, AudioSdRequest, 2> = Channel::new();
-pub static AUDIO_SD_RESPONSE: Signal<CriticalSectionRawMutex, AudioSdResponse> = Signal::new();
+static AUDIO_SD_REQUEST: Channel<CriticalSectionRawMutex, AudioSdRequest, 2> = Channel::new();
+static AUDIO_SD_RESPONSE: Signal<CriticalSectionRawMutex, AudioSdResponse> = Signal::new();
 
-pub static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new();
-pub static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::new();
+static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new();
+static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::new();
 
 /// Code from https://github.com/rp-rs/rp-hal-boards/blob/main/boards/rp-pico/examples/pico_spi_sd_card.rs
 /// A dummy timesource, which is mostly important for creating files.

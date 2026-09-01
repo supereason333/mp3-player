@@ -93,21 +93,21 @@ impl ScreenLogic for CatScreen {
 
     async fn on_enter(&mut self) {
         info!("Cat screen on enter");
-        info!("[Cat] Send SdRequest");
-        SD_REQUEST
-            .send(SdRequest::ReadFile(
-                self.opened_path.clone(),
-                self.opened_file.clone(),
-            ))
-            .await;
-        self.file_data = match SD_RESPONSE.wait().await {
-            SdResponse::FileContents(data) => data,
-            SdResponse::DirListing(_) => {
-                error!("[Cat] Got DirListing when expecting FileContents");
-                HVec::new() // degrade to empty listing rather than crashing
-            }
-        };
-        info!("[Cat] Recieved Sd Response");
+        // info!("[Cat] Send SdRequest");
+        // SD_REQUEST
+        //     .send(SdRequest::ReadFile(
+        //         self.opened_path.clone(),
+        //         self.opened_file.clone(),
+        //     ))
+        //     .await;
+        // self.file_data = match SD_RESPONSE.wait().await {
+        //     SdResponse::FileContents(data) => data,
+        //     SdResponse::DirListing(_) => {
+        //         error!("[Cat] Got DirListing when expecting FileContents");
+        //         HVec::new() // degrade to empty listing rather than crashing
+        //     }
+        // };
+        // info!("[Cat] Recieved Sd Response");
     }
 }
 impl FileOpenerScreen for CatScreen {

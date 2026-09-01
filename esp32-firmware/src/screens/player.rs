@@ -13,7 +13,7 @@ use crate::input::NavEvent;
 use crate::screens::browser::BrowserScreen;
 use crate::screens::{Screen, ScreenLogic, Transition};
 
-use crate::sd::{AUDIO_SD_RESPONSE, AudioSdResponse, DirPath};
+use crate::sd::DirPath;
 
 use crate::dac::{DAC_REQUEST, DacRequest};
 
@@ -39,12 +39,6 @@ impl ScreenLogic for PlayerScreen {
             NavEvent::Select => {
                 info!("[Player] Send DAC request stop signal");
                 DAC_REQUEST.signal(DacRequest::Stop);
-                loop {
-                    match AUDIO_SD_RESPONSE.wait().await {
-                        AudioSdResponse::Closed => break,
-                        _ => {}
-                    }
-                }
                 Transition::GoTo(Screen::Browser(BrowserScreen::new_with_path(
                     self.opened_path.clone(),
                 )))

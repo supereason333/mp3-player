@@ -4,8 +4,6 @@ use embassy_futures::select::{Either, select};
 
 // Audio stuff
 
-/// Opens a file for audio playback. Returns (data_offset, data_size) into the file
-/// where PCM data begins.
 pub async fn audio_open(path: DirPath, name: ShortFileName) -> Result<(u32, u32), ()> {
     AUDIO_SD_REQUEST
         .send(AudioSdRequest::Open(path, name))
@@ -27,23 +25,32 @@ pub async fn audio_close() -> Result<(), ()> {
     }
 }
 
-/// Requests the next chunk of audio data. Returns either a filled buffer,
-/// or Err(()) on EOF or a read error — check `AUDIO_SD_RESPONSE` semantics
-/// via the caller's own EOF handling if you need to distinguish the two.
 pub async fn audio_read_chunk() -> Result<AudioChunk, ()> {
     AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
 
-    // A successful read arrives on AUDIO_FILLED; EOF/Error arrive on AUDIO_SD_RESPONSE.
-    // Race both since we don't know ahead of time which one will fire.
     match select(AUDIO_FILLED.receive(), AUDIO_SD_RESPONSE.wait()).await {
         Either::First(chunk) => Ok(chunk),
-        Either::Second(_response) => Err(()), // Eof or Error, caller can't tell apart currently
+        Either::Second(_response) => Err(()), // Eof or Error
     }
 }
 
 pub async fn return_audio_chunk(chunk: AudioChunk) -> Result<(), ()> {
     AUDIO_EMPTY.send(chunk).await;
     Ok(())
+}
+
+pub async fn audio_request_chunk() {
+    AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+}
+
+pub fn audio_poll_chunk() -> Option<Result<AudioChunk, ()>> {
+    if let Ok(chunk) = AUDIO_FILLED.try_receive() {
+        return Some(Ok(chunk));
+    }
+    if AUDIO_SD_RESPONSE.try_take().is_some() {
+        return Some(Err(()));
+    }
+    None
 }
 
 // UI stuff
