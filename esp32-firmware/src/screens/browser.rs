@@ -15,7 +15,6 @@ use crate::display::FbType;
 use crate::input::NavEvent;
 use crate::screens::cat::CatScreen;
 use crate::screens::player::PlayerScreen;
-// use crate::screens::dialogue::DialogueScreen;
 use crate::screens::{Screen, ScreenLogic, Transition};
 
 use crate::sd::*;

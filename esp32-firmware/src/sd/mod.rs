@@ -1,4 +1,5 @@
 mod audio;
+pub mod client;
 mod ui;
 
 use audio::*;
@@ -32,6 +33,7 @@ use static_cell::StaticCell;
 
 pub type DirListing = HVec<(ShortFileName, u32, bool), 32>;
 pub type DirPath = HVec<ShortFileName, 16>;
+pub type AudioChunk = &'static mut [u8; AUDIO_CHUNK_BYTES];
 
 type SdBlockDevice =
     SdCard<ExclusiveDevice<SpiDmaBus<'static, Async>, Output<'static>, NoDelay>, Delay>;
@@ -57,10 +59,8 @@ pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 2;
 pub static AUDIO_BUF_0: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
 pub static AUDIO_BUF_1: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
 
-pub static AUDIO_FILLED: Channel<CriticalSectionRawMutex, &'static mut [u8; AUDIO_CHUNK_BYTES], 2> =
-    Channel::new();
-pub static AUDIO_EMPTY: Channel<CriticalSectionRawMutex, &'static mut [u8; AUDIO_CHUNK_BYTES], 2> =
-    Channel::new();
+pub static AUDIO_FILLED: Channel<CriticalSectionRawMutex, AudioChunk, 2> = Channel::new();
+pub static AUDIO_EMPTY: Channel<CriticalSectionRawMutex, AudioChunk, 2> = Channel::new();
 
 pub enum AudioSdRequest {
     Open(DirPath, ShortFileName),
