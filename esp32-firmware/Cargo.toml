@@ -38,6 +38,8 @@ embedded-graphics = "0.8"
 embedded-hal-async = "1.0.0"
 noise_perlin = "1.0.0"
 
+tinybmp = "0.6"
+
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
 [profile.dev]
 # The default debug profile is too slow and too big for resource-constrained devices.
