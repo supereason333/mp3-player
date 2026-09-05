@@ -48,5 +48,8 @@ pub fn paused() -> bool {
 }
 
 pub fn current_audio() -> Result<(DirPath, ShortFileName), ()> {
-    Err(())
+    Ok((
+        DirPath::new(),
+        ShortFileName::create_from_str("TESTFILE").unwrap(),
+    ))
 }

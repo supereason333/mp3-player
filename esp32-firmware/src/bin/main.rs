@@ -32,8 +32,8 @@ use esp_hal::{
 use esp32_mp3_player::dac;
 use esp32_mp3_player::display;
 use esp32_mp3_player::input::input_task;
-use esp32_mp3_player::screens;
 use esp32_mp3_player::sd::sd_task;
+use esp32_mp3_player::ui;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -161,7 +161,7 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(dac::dac_task(i2s_tx, i2s_tx_buffer).unwrap());
 
-    spawner.spawn(screens::screen_task::screen_task(disp).unwrap());
+    spawner.spawn(ui::ui_task(disp).unwrap());
 
     loop {
         Timer::after(Duration::from_secs(1)).await;

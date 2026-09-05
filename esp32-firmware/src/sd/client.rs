@@ -83,3 +83,7 @@ pub async fn ui_read_file(path: DirPath, name: ShortFileName) -> Result<HVec<u8,
         _ => Err(()),
     }
 }
+
+pub async fn get_track_data(path: DirPath, name: ShortFileName) -> Result<ShortFileName, ()> {
+    Err(())
+}

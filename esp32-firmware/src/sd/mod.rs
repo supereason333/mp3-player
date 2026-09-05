@@ -115,6 +115,7 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
             DummyTimesource,
         >,
     > = None; // NO SD CARD OVERRIDE, REMOVE WHEN CARD INSERTED
+    warn!("[SD] No card override enabled!");
 
     let mut playback: Option<AudioPlaybackState> = None;
 
