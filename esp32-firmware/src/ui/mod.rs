@@ -106,6 +106,26 @@ impl ScrollingText {
             .draw(fb)
             .unwrap();
     }
+    fn set_text(&mut self, text: &str) {
+        let mut truncated = String::<32>::new();
+        let _ = truncated.push_str(&text[..text.len().min(32)]);
+        self.text = truncated;
+        self.scroll_pos = if self.text.len() <= self.space_width as usize {
+            -1
+        } else {
+            0
+        };
+        self.t = 0;
+    }
+
+    fn reset_position(&mut self) {
+        self.scroll_pos = if self.text.len() <= self.space_width as usize {
+            -1
+        } else {
+            0
+        };
+        self.t = 0;
+    }
 }
 
 #[embassy_executor::task]
@@ -115,6 +135,14 @@ pub async fn ui_task(mut display: Display) {
     let mut current_screen = Screens::Main;
 
     let mut headertext = ScrollingText::new("Cooper is such a burger", Point::new(3, 7), 8);
+
+    let mut forceupdate = false;
+
+    // Set up main screen struct
+    let main_track_text = ScrollingText::new("None", Point::new(10, 27), 10);
+    let artist_text = ScrollingText::new("Cooper Burgess", Point::new(10, 39), 10);
+    let album_text = ScrollingText::new("Album", Point::new(10, 51), 10);
+    let mut main_screen = MainScreen::new(main_track_text, artist_text, album_text);
 
     loop {
         match draw_ui_bg(&mut fb, &current_screen) {
@@ -131,45 +159,83 @@ pub async fn ui_task(mut display: Display) {
         headertext.update(1, &mut fb);
 
         let transition = match current_screen {
-            Screens::Main => manage_main_screen(&mut fb),
+            Screens::Main => main_screen.update(&mut fb, forceupdate).await,
             Screens::Browser => ScreenTransition::Stay,
             Screens::Queue => ScreenTransition::Stay,
         };
+        forceupdate = false;
         display.write_framebuf(&fb).await;
+
         match transition {
-            ScreenTransition::Main => current_screen = Screens::Main,
-            ScreenTransition::Browser => current_screen = Screens::Browser,
-            ScreenTransition::Queue => current_screen = Screens::Queue,
-            _ => {}
+            ScreenTransition::Stay => {}
+            _ => {
+                match transition {
+                    ScreenTransition::Main => current_screen = Screens::Main,
+                    ScreenTransition::Browser => current_screen = Screens::Browser,
+                    ScreenTransition::Queue => current_screen = Screens::Queue,
+                    _ => {}
+                }
+                forceupdate = true;
+            }
         }
         Timer::after(Duration::from_millis(100)).await;
     }
 }
 
-fn manage_main_screen(fb: &mut FbType) -> ScreenTransition {
-    let text_style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE);
+struct MainScreen {
+    last_track_number: i32,
+    main_track_text: ScrollingText,
+    artist_text: ScrollingText,
+    album_text: ScrollingText,
+    updated_on_no_track: bool,
+}
 
-    // Draws audio info
-    match current_audio() {
-        Ok((path, filename)) => {
-            // Playing so draw text
-            let mut buf: String<16> = String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
-            let _ = core::write!(buf, "{}", filename);
-            // buf is heapless::String<16>, which derefs to &str:
-            let name_str: &str = &buf;
-
-            Text::new(name_str, Point::new(8, 27), text_style.clone())
-                .draw(fb)
-                .unwrap();
+impl MainScreen {
+    fn new(
+        main_track_text: ScrollingText,
+        artist_text: ScrollingText,
+        album_text: ScrollingText,
+    ) -> Self {
+        Self {
+            main_track_text,
+            artist_text,
+            album_text,
+            last_track_number: -1,
+            updated_on_no_track: false,
         }
-        Err(()) => {
-            Text::new("Nothing playing", Point::new(8, 27), text_style.clone())
-                .draw(fb)
-                .unwrap();
-        }
-    };
+    }
 
-    ScreenTransition::Stay
+    async fn update(&mut self, fb: &mut FbType, forceupdate: bool) -> ScreenTransition {
+        // let text_style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE);
+
+        // Draws audio info
+        match current_audio().await {
+            Ok((_path, filename, tracknumber)) => {
+                if self.last_track_number != tracknumber || forceupdate {
+                    self.updated_on_no_track = false;
+                    self.last_track_number = tracknumber;
+                    let mut buf: String<16> = String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
+                    let _ = core::write!(buf, "{}", filename);
+                    // buf is heapless::String<16>, which derefs to &str:
+                    let name_str: &str = &buf;
+
+                    self.main_track_text.set_text(name_str);
+                    self.main_track_text.reset_position();
+                }
+            }
+            Err(_tracknumber) => {
+                if !self.updated_on_no_track || forceupdate {
+                    self.updated_on_no_track = true;
+                    self.main_track_text.set_text("Nothing playing");
+                }
+            }
+        };
+        self.main_track_text.update(1, fb);
+        self.album_text.update(1, fb);
+        self.artist_text.update(1, fb);
+
+        ScreenTransition::Stay
+    }
 }
 
 fn draw_ui_bg(fb: &mut FbType, screen: &Screens) -> Result<(), ParseError> {

@@ -25,6 +25,7 @@ enum DacRequest {
     Play,
     Pause,
     Stop,
+    GetTrackInfo,
 }
 
 #[derive(defmt::Format)]
@@ -39,6 +40,7 @@ enum DacResponse {
     Opened,
     Closed,
     Error(DacError),
+    TrackInfo(Result<(DirPath, ShortFileName, i32), i32>),
 }
 
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -57,6 +59,8 @@ pub async fn dac_task(
 ) {
     info!("[DAC] DAC task spawned");
 
+    let mut tracknumber: i32 = 0;
+
     let scratch: &'static mut [u8; I2S_CHUNK_BYTES] = I2S_SCRATCH.init([0u8; I2S_CHUNK_BYTES]);
 
     loop {
@@ -64,14 +68,18 @@ pub async fn dac_task(
         let (path, name) = loop {
             match DAC_REQUEST.wait().await {
                 DacRequest::Start(path, name) => break (path, name),
+                DacRequest::GetTrackInfo => {
+                    DAC_RESPONSE.signal(DacResponse::TrackInfo(Err(tracknumber)));
+                }
                 _ => {
                     DAC_RESPONSE.signal(DacResponse::Error(DacError::NoAudioLoaded));
                 }
             }
         };
         DAC_RESPONSE.signal(DacResponse::Opened);
+        tracknumber += 1;
 
-        match audio_open(path, name).await {
+        match audio_open(path.clone(), name.clone()).await {
             Ok((data_offset, data_size)) => {
                 info!(
                     "[DAC] opened, {} bytes of PCM data at offset {}",
@@ -119,6 +127,13 @@ pub async fn dac_task(
                     }
                     DacRequest::Start(_, _) => {
                         DAC_RESPONSE.signal(DacResponse::Error(DacError::AlreadyPlaying))
+                    }
+                    DacRequest::GetTrackInfo => {
+                        DAC_RESPONSE.signal(DacResponse::TrackInfo(Ok((
+                            path.clone(),
+                            name.clone(),
+                            tracknumber,
+                        ))));
                     }
                     DacRequest::Pause | DacRequest::Play => {
                         defmt::panic!("PAUSE PLAY NOT IMPLIMENTED!"); // TODO: PAUSE PLAY

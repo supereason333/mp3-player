@@ -47,9 +47,13 @@ pub fn paused() -> bool {
     false
 }
 
-pub fn current_audio() -> Result<(DirPath, ShortFileName), ()> {
-    Ok((
-        DirPath::new(),
-        ShortFileName::create_from_str("TESTFILE").unwrap(),
-    ))
+pub async fn current_audio() -> Result<(DirPath, ShortFileName, i32), i32> {
+    DAC_REQUEST.signal(DacRequest::GetTrackInfo);
+    match DAC_RESPONSE.wait().await {
+        DacResponse::TrackInfo(info) => match info {
+            Ok((path, name, tracknumber)) => Ok((path, name, tracknumber)),
+            Err(tracknumber) => Err(tracknumber),
+        },
+        _ => Err(-1),
+    }
 }
