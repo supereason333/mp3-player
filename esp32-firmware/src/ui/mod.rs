@@ -39,33 +39,37 @@ enum ScreenTransition {
 }
 
 struct ScrollingText {
-    text: String<16>,
+    text: String<32>,
     screen_pos: Point,
     space_width: i32,
     scroll_pos: i32,
     t: i32,
 }
 
+const SCROLL_INTERVAL: i32 = 1;
+const PAUSE_DURATION: i32 = 5;
+
 impl ScrollingText {
-    fn new(text: String<16>, screen_pos: Point, space_width: i32) -> Self {
-        // Scroll pos as -1 means text does not need to scroll
-        let scroll_pos: i32;
-        if text.len() <= space_width as usize {
-            scroll_pos = -1;
+    fn new(text: &str, screen_pos: Point, space_width: i32) -> Self {
+        let scroll_pos: i32 = if text.len() <= space_width as usize {
+            -1
         } else {
-            scroll_pos = 0;
-        }
+            0
+        };
+
+        let mut truncated = String::<32>::new();
+        let _ = truncated.push_str(&text[..text.len().min(36)]);
+
         Self {
-            text: text,
-            screen_pos: screen_pos,
-            space_width: space_width,
-            scroll_pos: scroll_pos,
+            text: truncated,
+            screen_pos,
+            space_width,
+            scroll_pos,
             t: 0,
         }
     }
     fn update(&mut self, dt: i32, fb: &mut FbType) {
         let text_style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE);
-
         if self.scroll_pos == -1 {
             // Dosent need to scroll, just update text
             let name_str: &str = &self.text;
@@ -74,17 +78,30 @@ impl ScrollingText {
                 .unwrap();
             return;
         }
-        self.scroll_pos += 1;
-        if self.scroll_pos > self.space_width - self.text.len() as i32 {
-            self.scroll_pos = 0;
+
+        let max_scroll = self.text.len() as i32 - self.space_width;
+        self.t += dt;
+
+        // Hold longer at the start and end positions, step normally in between
+        let at_end = self.scroll_pos == 0 || self.scroll_pos == max_scroll;
+        let threshold = if at_end {
+            PAUSE_DURATION
+        } else {
+            SCROLL_INTERVAL
+        };
+
+        if self.t >= threshold {
+            self.t = 0;
+            self.scroll_pos += 1;
+            if self.scroll_pos > max_scroll {
+                self.scroll_pos = 0;
+            }
         }
 
         let start = self.scroll_pos as usize;
         let end = (self.scroll_pos + self.space_width) as usize;
-        let end = end.min(self.text.len()); // clamp so it never runs past the string
-
+        let end = end.min(self.text.len());
         let str: &str = self.text.get(start..end).unwrap_or("");
-
         Text::new(str, self.screen_pos, text_style.clone())
             .draw(fb)
             .unwrap();
@@ -97,6 +114,8 @@ pub async fn ui_task(mut display: Display) {
     let mut fb: FbType = Framebuffer::new();
     let mut current_screen = Screens::Main;
 
+    let mut headertext = ScrollingText::new("Cooper is such a burger", Point::new(3, 7), 8);
+
     loop {
         match draw_ui_bg(&mut fb, &current_screen) {
             Ok(()) => {}
@@ -108,15 +127,8 @@ pub async fn ui_task(mut display: Display) {
         }
 
         // Draw header info
-        let text_style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE);
-
-        Text::new(
-            "Cooper is such a burger",
-            Point::new(3, 7),
-            text_style.clone(),
-        )
-        .draw(&mut fb)
-        .unwrap();
+        // let text_style = MonoTextStyle::new(&FONT_4X6, Rgb565::WHITE);
+        headertext.update(1, &mut fb);
 
         let transition = match current_screen {
             Screens::Main => manage_main_screen(&mut fb),
@@ -130,7 +142,7 @@ pub async fn ui_task(mut display: Display) {
             ScreenTransition::Queue => current_screen = Screens::Queue,
             _ => {}
         }
-        Timer::after(Duration::from_secs(1)).await;
+        Timer::after(Duration::from_millis(100)).await;
     }
 }
 
