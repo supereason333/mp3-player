@@ -7,7 +7,7 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use defmt::info;
+use defmt::{error, info, warn};
 use defmt_rtt as _;
 use esp_backtrace as _;
 use esp_hal::gpio::{Output, OutputConfig};
@@ -29,11 +29,20 @@ use esp_hal::{
     time::Rate,
 };
 
-use esp32_mp3_player::dac;
+use embedded_graphics::Drawable;
+use embedded_graphics::framebuffer::Framebuffer;
+use embedded_graphics::image::Image;
+use embedded_graphics::prelude::{Point, RgbColor};
+use tinybmp::{Bmp, ParseError};
+
 use esp32_mp3_player::display;
 use esp32_mp3_player::input::input_task;
 use esp32_mp3_player::sd::sd_task;
 use esp32_mp3_player::ui;
+use esp32_mp3_player::{dac, sd};
+
+pub static BOOT_SPLASH_BMP: &[u8] = include_bytes!("../assets/boot-splash.bmp");
+pub static NO_SD_SPLASH: &[u8] = include_bytes!("../assets/no-sd.bmp");
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -107,7 +116,7 @@ async fn main(spawner: Spawner) -> ! {
     .with_buffers(dma_rx_buf, dma_tx_buf)
     .into_async();
 
-    let sd_cs = Output::new(cs, Level::Low, OutputConfig::default());
+    let sd_cs = Output::new(cs, Level::High, OutputConfig::default());
 
     // I2S setup
     let lrck = peripherals.GPIO14;
@@ -156,6 +165,34 @@ async fn main(spawner: Spawner) -> ! {
     info!("Init finished!");
 
     spawner.spawn(sd_task(sd_spi, sd_cs).unwrap());
+
+    match Bmp::<embedded_graphics::pixelcolor::Rgb565>::from_slice(BOOT_SPLASH_BMP) {
+        Ok(bmp) => {
+            let mut fb: display::FbType = Framebuffer::new();
+            let image = Image::new(&bmp, Point::zero());
+            image.draw(&mut fb).unwrap();
+            disp.write_framebuf(&fb).await;
+        }
+        Err(_) => warn!("Could not draw boot splash"),
+    }
+
+    Timer::after(Duration::from_millis(500)).await;
+
+    match sd::client::await_setup_response().await {
+        Ok(()) => {}
+        Err(()) => {
+            error!("SD Card is prob not inserted or something");
+            let bmp =
+                Bmp::<embedded_graphics::pixelcolor::Rgb565>::from_slice(NO_SD_SPLASH).unwrap();
+            let mut fb: display::FbType = Framebuffer::new();
+            let image = Image::new(&bmp, Point::zero());
+            image.draw(&mut fb).unwrap();
+            disp.write_framebuf(&fb).await;
+            loop {
+                Timer::after(Duration::from_secs(1)).await;
+            }
+        }
+    }
 
     spawner.spawn(input_task(dial_up, dial_down, dial_select, btn_play, btn_back).unwrap());
 

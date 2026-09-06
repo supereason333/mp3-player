@@ -49,6 +49,7 @@ enum SdRequest {
 enum SdResponse {
     DirListing(DirListing),
     FileContents(HVec<u8, 512>),
+    SetupFinished(Result<(), ()>),
 }
 
 // AUdio stuff
@@ -105,17 +106,24 @@ impl TimeSource for DummyTimesource {
 pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>) -> ! {
     info!("[SD] SD task spawned");
 
-    // let mut volume_mgr = match set_up_sd(spi_device, cs).await {
-    //     Ok(card) => Some(VolumeManager::new(card, DummyTimesource::default())),
-    //     Err(_e) => None,
-    // };
-    let mut volume_mgr: Option<
-        VolumeManager<
-            SdCard<ExclusiveDevice<SpiDmaBus<'static, Async>, Output<'static>, NoDelay>, Delay>,
-            DummyTimesource,
-        >,
-    > = None; // NO SD CARD OVERRIDE, REMOVE WHEN CARD INSERTED
-    warn!("[SD] No card override enabled!");
+    let mut volume_mgr = match set_up_sd(spi_device, cs).await {
+        Ok(card) => {
+            SD_RESPONSE.signal(SdResponse::SetupFinished(Ok(())));
+            Some(VolumeManager::new(card, DummyTimesource::default()))
+        }
+        Err(_e) => {
+            SD_RESPONSE.signal(SdResponse::SetupFinished(Err(())));
+            None
+        }
+    };
+
+    // let mut volume_mgr: Option<
+    //     VolumeManager<
+    //         SdCard<ExclusiveDevice<SpiDmaBus<'static, Async>, Output<'static>, NoDelay>, Delay>,
+    //         DummyTimesource,
+    //     >,
+    // > = None; // NO SD CARD OVERRIDE, REMOVE WHEN CARD INSERTED
+    // warn!("[SD] No card override enabled!");
 
     let mut playback: Option<AudioPlaybackState> = None;
 
@@ -150,6 +158,7 @@ async fn set_up_sd(
     };
     let sdcard = SdCard::new(exclusive_device, Delay);
 
+    info!("[SD] Getting Card size");
     let sd_size = sdcard.num_bytes()?;
     info!("[SD] card size is {} bytes", sd_size);
 

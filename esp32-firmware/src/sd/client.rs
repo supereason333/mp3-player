@@ -87,3 +87,11 @@ pub async fn ui_read_file(path: DirPath, name: ShortFileName) -> Result<HVec<u8,
 pub async fn get_track_data(path: DirPath, name: ShortFileName) -> Result<ShortFileName, ()> {
     Err(())
 }
+
+/// Should only be used by main as a way to see if SD is set up properly, otherwise dont use
+pub async fn await_setup_response() -> Result<(), ()> {
+    match SD_RESPONSE.wait().await {
+        SdResponse::SetupFinished(result) => result,
+        _ => Err(()),
+    }
+}
