@@ -28,23 +28,49 @@ pub async fn end_playback() -> Result<(), DacError> {
     }
 }
 
-pub fn pause() -> Result<(), ()> {
-    error!("[DAC] Pause not implimented");
-    Err(())
+/// Sends pause signal and awaits response, slow but guaranteed
+pub async fn pause() -> Result<(), DacError> {
+    DAC_REQUEST.signal(DacRequest::Pause);
+    match DAC_RESPONSE.wait().await {
+        DacResponse::Paused => Ok(()),
+        DacResponse::Error(e) => {
+            error!("[DAC] Could not pause: {}", e);
+            Err(e)
+        }
+        _ => Err(DacError::UnknownResponse),
+    }
 }
 
-pub fn play() -> Result<(), ()> {
-    error!("[DAC] Play not implimented");
-    Err(())
+/// Sets the paused flag to true, does not wait, instant
+pub fn pause_atomic() {
+    DAC_PAUSED.store(true, Ordering::Relaxed);
 }
 
-/// Does the DAC have anything to play
+/// Sends play signal and awaits response, slow but guaranteed
+pub async fn play() -> Result<(), DacError> {
+    DAC_REQUEST.signal(DacRequest::Play);
+    match DAC_RESPONSE.wait().await {
+        DacResponse::Playing => Ok(()),
+        DacResponse::Error(e) => {
+            error!("[DAC] Could not play: {}", e);
+            Err(e)
+        }
+        _ => Err(DacError::UnknownResponse),
+    }
+}
+
+/// Sets paused flag to true
+pub fn play_atomic() {
+    DAC_PAUSED.store(false, Ordering::Relaxed);
+}
+
+/// Does the DAC have anything to play (playing or paused)
 pub fn has_audio_loaded() -> bool {
-    false
+    DAC_LOADED.load(Ordering::Relaxed)
 }
 
 pub fn paused() -> bool {
-    false
+    DAC_PAUSED.load(Ordering::Relaxed)
 }
 
 pub async fn current_audio() -> Result<(DirPath, ShortFileName, i32), i32> {

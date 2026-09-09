@@ -7,6 +7,8 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
+use core::fmt::Write;
+
 use defmt::{error, info, warn};
 use defmt_rtt as _;
 use esp_backtrace as _;
@@ -15,6 +17,7 @@ use esp_hal::gpio::{Output, OutputConfig};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::clock::CpuClock;
+use esp_hal::i2s::master::Channels;
 use esp_hal::timer::timg::TimerGroup;
 
 use esp_hal::{
@@ -126,7 +129,8 @@ async fn main(spawner: Spawner) -> ! {
     let (i2s_tx_buffer, i2s_tx_descriptors, _, _) = dma_buffers!(4 * 4092, 0);
 
     let i2s_config = I2sConfig::new_tdm_philips()
-        // .with_sample_rate(Rate::from_hz(sample_rate))
+        .with_channels(Channels::STEREO)
+        .with_sample_rate(Rate::from_khz(48))
         .with_data_format(DataFormat::Data16Channel16);
 
     let i2s = I2s::new(peripherals.I2S0, peripherals.DMA_CH2, i2s_config)
@@ -200,8 +204,34 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(ui::ui_task(disp).unwrap());
 
+    let path: sd::DirPath = heapless::Vec::new();
+    // path.push(embedded_sdmmc::ShortFileName::create_from_str("a").unwrap());
+
+    Timer::after(Duration::from_secs(1)).await;
+
+    let dir = sd::client::ui_list_dir(path.clone()).await.unwrap();
+    for (name, size, is_dir) in dir.iter() {
+        let mut buf: heapless::String<16> = heapless::String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
+        if is_dir.clone() {
+            let _ = core::write!(buf, "{}/", name);
+        } else {
+            let _ = core::write!(buf, "{}", name);
+        }
+        // buf is heapless::String<16>, which derefs to &str:
+        let name_str: &str = &buf;
+        info!("File: {}", name_str);
+
+        if name.extension() == b"WAV" {
+            dac::client::start_playback(path, name.clone())
+                .await
+                .unwrap();
+            break;
+        }
+    }
+    info!("Playback started");
+
     loop {
-        Timer::after(Duration::from_secs(1)).await;
+        Timer::after(Duration::from_secs(100)).await;
     }
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.1.0/examples
 }

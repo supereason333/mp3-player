@@ -1,8 +1,12 @@
 // dac.rs
 pub mod client;
 
+use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::*;
 use defmt_rtt as _;
+use embassy_futures::select::Either;
+use embassy_futures::select::select;
+use heapless::Deque;
 use static_cell::StaticCell;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -14,11 +18,17 @@ use embedded_sdmmc::ShortFileName;
 use esp_hal::Async;
 use esp_hal::i2s::master::I2sTx;
 
+use crate::dac::DacRequest::Start;
 use crate::sd::DirPath;
 use crate::sd::client::*;
 
 static DAC_REQUEST: Signal<CriticalSectionRawMutex, DacRequest> = Signal::new();
 static DAC_RESPONSE: Signal<CriticalSectionRawMutex, DacResponse> = Signal::new();
+
+/// True whenever a track is open (playing or paused). Mirrors current.is_some().
+static DAC_LOADED: AtomicBool = AtomicBool::new(false);
+/// True only while genuinely paused (i.e. inside wait_paused()).
+static DAC_PAUSED: AtomicBool = AtomicBool::new(false);
 
 enum DacRequest {
     Start(DirPath, ShortFileName),
@@ -26,21 +36,28 @@ enum DacRequest {
     Pause,
     Stop,
     GetTrackInfo,
-}
-
-#[derive(defmt::Format)]
-pub enum DacError {
-    NoAudioLoaded,
-    CantOpenFile,
-    AlreadyPlaying,
-    UnknownResponse,
+    GetQueue,
+    ClearQueue,
+    GetStatus,
 }
 
 enum DacResponse {
     Opened,
     Closed,
+    Paused,
+    Playing,
     Error(DacError),
     TrackInfo(Result<(DirPath, ShortFileName, i32), i32>),
+    Status { loaded: bool, paused: bool },
+}
+
+#[derive(defmt::Format, Debug)]
+pub enum DacError {
+    NoAudioLoaded,
+    CantOpenFile,
+    AlreadyPlaying,
+    UnknownResponse,
+    Unimplimented,
 }
 
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -54,146 +71,261 @@ static I2S_SCRATCH: StaticCell<[u8; I2S_CHUNK_BYTES]> = StaticCell::new();
 
 #[embassy_executor::task]
 pub async fn dac_task(
-    mut i2s_tx: I2sTx<'static, Async>,
+    i2s_tx: I2sTx<'static, Async>,
     tx_buffer: &'static mut [u8; DMA_BUFFER_SIZE],
 ) {
     info!("[DAC] DAC task spawned");
 
-    let mut tracknumber: i32 = 0;
+    let mut player = Player::new(i2s_tx, tx_buffer);
 
-    let scratch: &'static mut [u8; I2S_CHUNK_BYTES] = I2S_SCRATCH.init([0u8; I2S_CHUNK_BYTES]);
+    DAC_LOADED.store(false, Ordering::Relaxed);
+    DAC_PAUSED.store(false, Ordering::Relaxed);
 
     loop {
-        // Wait for a Start request, opening the file via the SD client.
-        let (path, name) = loop {
+        player.stopped().await;
+        player.playing().await;
+    }
+}
+
+struct Player {
+    tracknumber: i32,
+    queue: Deque<(DirPath, ShortFileName), 16>,
+    tx_buffer: &'static mut [u8; DMA_BUFFER_SIZE],
+    i2s: I2sTx<'static, Async>,
+    current: Option<(DirPath, ShortFileName)>,
+}
+
+/// Why play_loaded() ended, decided by playing().
+enum PlayOutcome {
+    Stop,
+    Next,
+    SwitchTo(DirPath, ShortFileName),
+}
+
+/// Why the paused sub-loop ended, decided by play_loaded().
+enum PauseOutcome {
+    Resume,
+    Stop,
+    SwitchTo(DirPath, ShortFileName),
+}
+
+impl Player {
+    fn new(i2s: I2sTx<'static, Async>, tx_buffer: &'static mut [u8; DMA_BUFFER_SIZE]) -> Self {
+        Self {
+            tracknumber: 0,
+            queue: Deque::new(),
+            tx_buffer,
+            i2s,
+            current: None,
+        }
+    }
+
+    /// Waiting for something to play. Returns once `self.current` is Some.
+    async fn stopped(&mut self) {
+        self.current = None;
+        DAC_LOADED.store(false, Ordering::Relaxed);
+        DAC_PAUSED.store(false, Ordering::Relaxed);
+        audio_close().await.ok();
+        loop {
             match DAC_REQUEST.wait().await {
-                DacRequest::Start(path, name) => break (path, name),
-                DacRequest::GetTrackInfo => {
-                    DAC_RESPONSE.signal(DacResponse::TrackInfo(Err(tracknumber)));
+                DacRequest::Start(path, name) => {
+                    self.current = Some((path, name));
+                    DAC_LOADED.store(true, Ordering::Relaxed);
+                    return;
                 }
-                _ => {
+                DacRequest::GetTrackInfo => {
+                    DAC_RESPONSE.signal(DacResponse::TrackInfo(Err(self.tracknumber)));
+                }
+                DacRequest::GetStatus => {
+                    DAC_RESPONSE.signal(DacResponse::Status {
+                        loaded: false,
+                        paused: false,
+                    });
+                }
+                DacRequest::ClearQueue => {
+                    self.queue.clear();
+                }
+                DacRequest::GetQueue => {
+                    // TODO: no DacResponse variant carries queue contents yet.
+                }
+                DacRequest::Play | DacRequest::Pause | DacRequest::Stop => {
                     DAC_RESPONSE.signal(DacResponse::Error(DacError::NoAudioLoaded));
                 }
             }
-        };
-        DAC_RESPONSE.signal(DacResponse::Opened);
-        tracknumber += 1;
+        }
+    }
 
-        match audio_open(path.clone(), name.clone()).await {
-            Ok((data_offset, data_size)) => {
-                info!(
-                    "[DAC] opened, {} bytes of PCM data at offset {}",
-                    data_size, data_offset
-                );
+    /// Has a track loaded (playing or paused). Returns once `self.current` is None.
+    async fn playing(&mut self) {
+        loop {
+            let Some((path, name)) = self.current.clone() else {
+                return;
+            };
+
+            if audio_open(path.clone(), name.clone()).await.is_err() {
+                DAC_RESPONSE.signal(DacResponse::Error(DacError::CantOpenFile));
+                return;
             }
-            Err(()) => {
-                error!("[DAC] Cant open file!");
-                continue;
+            DAC_RESPONSE.signal(DacResponse::Opened);
+            self.tracknumber += 1;
+
+            match self.play_loaded().await {
+                PlayOutcome::Stop => {
+                    audio_close().await.ok();
+                    DAC_RESPONSE.signal(DacResponse::Closed);
+                    return;
+                }
+                PlayOutcome::Next => {
+                    audio_close().await.ok();
+                    match self.queue.pop_front() {
+                        Some((p, n)) => self.current = Some((p, n)),
+                        None => return,
+                    }
+                }
+                PlayOutcome::SwitchTo(p, n) => {
+                    audio_close().await.ok();
+                    self.current = Some((p, n));
+                }
             }
         }
+    }
 
-        // Prime the first chunk before starting the DMA transfer.
-        let pending_chunk = match audio_read_chunk().await {
-            Ok(chunk) => chunk,
-            Err(_e) => {
-                error!("[DAC] no data on first read, aborting playback");
-                audio_close().await.ok();
-                continue;
-            }
-        };
+    async fn play_loaded(&mut self) -> PlayOutcome {
+        let mut transfer = self
+            .i2s
+            .write_dma_circular(self.tx_buffer)
+            .expect("failed to start I2S DMA transfer");
 
-        pcm_bytes_to_i2s_bytes(pending_chunk, scratch);
-        return_audio_chunk(pending_chunk).await;
-
-        let mut transfer = match i2s_tx.write_dma_circular(tx_buffer) {
-            Ok(t) => t,
-            Err(e) => {
-                error!("failed to start I2S DMA transfer");
-                continue;
-            }
-        };
-
-        let mut pending_offset = 0usize;
-        let mut chunk_requested = false;
-
-        'playback: loop {
-            // Check for stop/new-start requests.
-            if let Some(req) = DAC_REQUEST.try_take() {
-                match req {
-                    DacRequest::Stop => {
-                        DAC_RESPONSE.signal(DacResponse::Closed);
-                        audio_close().await.ok();
-                        break 'playback;
+        loop {
+            if DAC_PAUSED.load(Ordering::Relaxed) {
+                core::mem::drop(transfer);
+                match self.wait_paused().await {
+                    PauseOutcome::Resume => {
+                        DAC_PAUSED.store(false, Ordering::Relaxed);
+                        transfer = self
+                            .i2s
+                            .write_dma_circular(self.tx_buffer)
+                            .expect("failed to restart I2S DMA transfer");
                     }
-                    DacRequest::Start(_, _) => {
-                        DAC_RESPONSE.signal(DacResponse::Error(DacError::AlreadyPlaying))
+                    PauseOutcome::Stop => return PlayOutcome::Stop,
+                    PauseOutcome::SwitchTo(p, n) => return PlayOutcome::SwitchTo(p, n),
+                }
+            }
+
+            match select(audio_read_chunk(), DAC_REQUEST.wait()).await {
+                Either::First(Ok(chunk)) => {
+                    let data = chunk.as_slice();
+                    let mut offset = 0;
+                    while offset < data.len() {
+                        match transfer.available() {
+                            Ok(avail) if avail > 0 => {
+                                let take = avail.min(data.len() - offset);
+                                match transfer.push(&data[offset..offset + take]) {
+                                    Ok(_) => offset += take,
+                                    Err(_) => {
+                                        // Known esp-hal bug: available() sticks at 0
+                                        // after a non-aligned push. Recreate the transfer.
+                                        core::mem::drop(transfer);
+                                        transfer = self
+                                            .i2s
+                                            .write_dma_circular(self.tx_buffer)
+                                            .expect("failed to restart I2S DMA transfer");
+                                    }
+                                }
+                            }
+                            Ok(_) => Timer::after(Duration::from_millis(10)).await,
+                            Err(_) => {
+                                core::mem::drop(transfer);
+                                transfer = self
+                                    .i2s
+                                    .write_dma_circular(self.tx_buffer)
+                                    .expect("failed to restart I2S DMA transfer");
+                            }
+                        }
+                    }
+                    return_audio_chunk(chunk).await;
+                }
+                Either::First(Err(SdError::AudioEofReached)) => return PlayOutcome::Next,
+                Either::First(Err(_)) => {
+                    DAC_RESPONSE.signal(DacResponse::Error(DacError::UnknownResponse));
+                    return PlayOutcome::Stop;
+                }
+                Either::Second(DacRequest::Pause) => {
+                    core::mem::drop(transfer);
+                    DAC_PAUSED.store(true, Ordering::Relaxed);
+                    match self.wait_paused().await {
+                        PauseOutcome::Resume => {
+                            DAC_PAUSED.store(false, Ordering::Relaxed);
+                            transfer = self
+                                .i2s
+                                .write_dma_circular(self.tx_buffer)
+                                .expect("failed to restart I2S DMA transfer");
+                        }
+                        PauseOutcome::Stop => return PlayOutcome::Stop,
+                        PauseOutcome::SwitchTo(p, n) => return PlayOutcome::SwitchTo(p, n),
+                    }
+                }
+                Either::Second(DacRequest::Stop) => return PlayOutcome::Stop,
+                Either::Second(DacRequest::Start(p, n)) => return PlayOutcome::SwitchTo(p, n),
+                Either::Second(DacRequest::Play) => {
+                    DAC_RESPONSE.signal(DacResponse::Error(DacError::AlreadyPlaying));
+                }
+                Either::Second(DacRequest::GetTrackInfo) => {
+                    let (path, name) = self.current.clone().unwrap();
+                    DAC_RESPONSE.signal(DacResponse::TrackInfo(Ok((path, name, self.tracknumber))));
+                }
+                Either::Second(DacRequest::GetStatus) => {
+                    DAC_RESPONSE.signal(DacResponse::Status {
+                        loaded: true,
+                        paused: false,
+                    });
+                }
+                Either::Second(DacRequest::ClearQueue) => self.queue.clear(),
+                Either::Second(DacRequest::GetQueue) => {
+                    // TODO: no DacResponse variant carries queue contents yet.
+                }
+            }
+        }
+    }
+
+    /// Paused: file stays open, no chunks are read, just waits for a control signal.
+    /// Signals Paused on entry so pause() has something to await, and Playing
+    /// when resumed so play() does too.
+    async fn wait_paused(&mut self) -> PauseOutcome {
+        DAC_RESPONSE.signal(DacResponse::Paused);
+        loop {
+            if !DAC_PAUSED.load(Ordering::Relaxed) {
+                return PauseOutcome::Resume;
+            }
+            // Either wait for request to start, or poll DAC_PAUSED
+            match select(DAC_REQUEST.wait(), Timer::after(Duration::from_millis(100))).await {
+                Either::First(req) => match req {
+                    DacRequest::Play => {
+                        DAC_RESPONSE.signal(DacResponse::Playing);
+                        return PauseOutcome::Resume;
+                    }
+                    DacRequest::Stop => return PauseOutcome::Stop,
+                    DacRequest::Start(p, n) => return PauseOutcome::SwitchTo(p, n),
+                    DacRequest::Pause => {
+                        DAC_RESPONSE.signal(DacResponse::Error(DacError::UnknownResponse));
                     }
                     DacRequest::GetTrackInfo => {
-                        DAC_RESPONSE.signal(DacResponse::TrackInfo(Ok((
-                            path.clone(),
-                            name.clone(),
-                            tracknumber,
-                        ))));
+                        let (p, n) = self.current.clone().unwrap();
+                        DAC_RESPONSE.signal(DacResponse::TrackInfo(Ok((p, n, self.tracknumber))));
                     }
-                    DacRequest::Pause | DacRequest::Play => {
-                        defmt::panic!("PAUSE PLAY NOT IMPLIMENTED!"); // TODO: PAUSE PLAY
+                    DacRequest::GetStatus => {
+                        DAC_RESPONSE.signal(DacResponse::Status {
+                            loaded: true,
+                            paused: true,
+                        });
                     }
-                }
+                    DacRequest::ClearQueue => self.queue.clear(),
+                    DacRequest::GetQueue => {
+                        // TODO: no DacResponse variant carries queue contents yet.
+                    }
+                },
+                Either::Second(_) => {}
             }
-
-            // Service the DMA transfer.
-            match transfer.available() {
-                Ok(avail) if avail > 0 && pending_offset < scratch.len() => {
-                    let remaining = scratch.len() - pending_offset;
-                    let push_len = avail.min(remaining);
-                    match transfer.push(&scratch[pending_offset..pending_offset + push_len]) {
-                        Ok(_) => pending_offset += push_len,
-                        Err(_) => {
-                            error!("[DAC] DMA push failed, recreating transfer");
-                            core::mem::drop(transfer);
-                            transfer = i2s_tx
-                                .write_dma_circular(tx_buffer)
-                                .expect("failed to restart I2S DMA transfer");
-                            pending_offset = 0;
-                        }
-                    }
-                }
-                Err(_) => {
-                    error!("[DAC] DMA available() errored, recreating transfer");
-                    core::mem::drop(transfer);
-                    transfer = i2s_tx
-                        .write_dma_circular(tx_buffer)
-                        .expect("failed to restart I2S DMA transfer");
-                    pending_offset = 0;
-                }
-                _ => {}
-            }
-
-            // Scratch buffer exhausted — kick off/poll the next chunk.
-            if pending_offset >= scratch.len() {
-                if !chunk_requested {
-                    audio_request_chunk().await;
-                    chunk_requested = true;
-                }
-
-                if let Some(result) = audio_poll_chunk() {
-                    chunk_requested = false;
-                    match result {
-                        Ok(chunk) => {
-                            pcm_bytes_to_i2s_bytes(chunk, scratch);
-                            return_audio_chunk(chunk).await;
-                            pending_offset = 0;
-                        }
-                        Err(()) => {
-                            info!("[DAC] playback ended (EOF or read error)");
-                            audio_close().await.ok();
-                            break 'playback;
-                        }
-                    }
-                }
-            }
-
-            Timer::after(Duration::from_millis(2)).await;
         }
     }
 }
