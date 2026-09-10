@@ -49,6 +49,7 @@ pub async fn return_audio_chunk(chunk: AudioChunk) {
     AUDIO_EMPTY.send(chunk).await;
 }
 
+/// Basicaly is track open, if not you prob want to open
 pub fn audio_is_track_loaded() -> bool {
     TRACK_LOADED.load(Ordering::Relaxed)
 }

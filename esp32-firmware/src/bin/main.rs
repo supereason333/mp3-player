@@ -166,10 +166,12 @@ async fn main(spawner: Spawner) -> ! {
         InputConfig::default().with_pull(Pull::Up),
     );
 
-    info!("Init finished!");
+    info!("Peripheral init finished!");
 
+    info!("Spawning SD task");
     spawner.spawn(sd_task(sd_spi, sd_cs).unwrap());
 
+    info!("Drawing boot splash");
     match Bmp::<embedded_graphics::pixelcolor::Rgb565>::from_slice(BOOT_SPLASH_BMP) {
         Ok(bmp) => {
             let mut fb: display::FbType = Framebuffer::new();
@@ -183,7 +185,9 @@ async fn main(spawner: Spawner) -> ! {
     Timer::after(Duration::from_millis(500)).await;
 
     match sd::client::await_setup_response().await {
-        Ok(()) => {}
+        Ok(()) => {
+            info!("SD setup response OK");
+        }
         Err(()) => {
             error!("SD Card is prob not inserted or something");
             let bmp =
@@ -198,11 +202,16 @@ async fn main(spawner: Spawner) -> ! {
         }
     }
 
+    info!("Spawing input task");
     spawner.spawn(input_task(dial_up, dial_down, dial_select, btn_play, btn_back).unwrap());
 
+    info!("Spawing DAC task");
     spawner.spawn(dac::dac_task(i2s_tx, i2s_tx_buffer).unwrap());
 
+    info!("Spawing UI task");
     spawner.spawn(ui::ui_task(disp).unwrap());
+
+    info!("Finished setting up!");
 
     let path: sd::DirPath = heapless::Vec::new();
     // path.push(embedded_sdmmc::ShortFileName::create_from_str("a").unwrap());

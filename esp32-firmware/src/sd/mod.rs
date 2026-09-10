@@ -20,7 +20,7 @@ use embassy_sync::signal::Signal;
 use embedded_sdmmc::Directory;
 use heapless::Vec as HVec;
 
-use embassy_futures::select::{Either3, select3};
+use embassy_futures::select::{Either, Either3, select, select3};
 
 use embedded_sdmmc::{RawDirectory, SdCard, ShortFileName, TimeSource, Timestamp, VolumeManager};
 
@@ -58,12 +58,14 @@ enum SdResponse {
 }
 
 // AUdio stuff
-pub const AUDIO_CHUNK_BYTES: usize = 1024 * 8;
+pub const AUDIO_CHUNK_BYTES: usize = 1024 * 4;
 pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 2;
 
 // Static buffers for audio
 static AUDIO_BUF_0: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
 static AUDIO_BUF_1: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
+static AUDIO_BUF_2: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
+static AUDIO_BUF_3: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
 
 static AUDIO_FILLED: Channel<CriticalSectionRawMutex, AudioChunk, 4> = Channel::new();
 static AUDIO_EMPTY: Channel<CriticalSectionRawMutex, AudioChunk, 4> = Channel::new();
@@ -114,6 +116,7 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
     let mut volume_mgr = match set_up_sd(spi_device, cs).await {
         Ok(card) => {
             SD_RESPONSE.signal(SdResponse::SetupFinished(Ok(())));
+            info!("[SD] Got volume mgr");
             VolumeManager::new(card, DummyTimesource::default())
         }
         Err(_e) => {
@@ -135,48 +138,65 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
     let mut playback: Option<AudioPlaybackState> = None;
     TRACK_LOADED.store(false, Ordering::Relaxed);
 
+    info!("[SD] Setting up static buffers");
     // static buffer setup
     let buf0 = AUDIO_BUF_0.init([0u8; AUDIO_CHUNK_BYTES]);
     let buf1 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
-    let buf2 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
-    let buf3 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
+    let buf2 = AUDIO_BUF_2.init([0u8; AUDIO_CHUNK_BYTES]);
+    let buf3 = AUDIO_BUF_3.init([0u8; AUDIO_CHUNK_BYTES]);
     AUDIO_EMPTY.try_send(buf0).ok();
     AUDIO_EMPTY.try_send(buf1).ok();
     AUDIO_EMPTY.try_send(buf2).ok();
     AUDIO_EMPTY.try_send(buf3).ok();
+
+    info!("[SD] Finished setting up");
     loop {
-        match select3(
-            AUDIO_SD_REQUEST.receive(),
-            SD_REQUEST.receive(),
-            AUDIO_EMPTY.ready_to_receive(),
-        )
-        .await
-        {
-            Either3::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
-            Either3::Second(req) => handle_ui_request(req, &volume_mgr).await,
-            Either3::Third(()) => {
-                if let Some(state) = &mut playback {
-                    let buf = AUDIO_EMPTY.receive().await; // Since buffer is there, it should recieve instantly
-                    match volume_mgr.read(state.file, buf.as_mut_slice()) {
-                        Ok(0) => {
-                            AUDIO_EMPTY.send(buf).await;
-                            close(state, &volume_mgr).unwrap();
-                            playback = None;
-                        }
-                        Ok(n) => {
-                            // Successful read
-                            if n < AUDIO_CHUNK_BYTES {
-                                buf[n..].fill(0);
-                                info!("Trailing zeros in audio chunk, len {}", n);
+        if playback.is_some() {
+            match select3(
+                AUDIO_SD_REQUEST.receive(),
+                SD_REQUEST.receive(),
+                AUDIO_EMPTY.ready_to_receive(),
+            )
+            .await
+            {
+                Either3::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
+                Either3::Second(req) => handle_ui_request(req, &volume_mgr).await,
+                Either3::Third(()) => {
+                    let mut eof = false;
+                    if let Some(state) = &mut playback {
+                        while let Ok(buf) = AUDIO_EMPTY.try_receive() {
+                            match volume_mgr.read(state.file, buf.as_mut_slice()) {
+                                Ok(0) => {
+                                    AUDIO_EMPTY.send(buf).await;
+                                    close(state, &volume_mgr).unwrap();
+                                    eof = true;
+                                }
+                                Ok(n) => {
+                                    // Successful read
+                                    if n < AUDIO_CHUNK_BYTES {
+                                        buf[n..].fill(0);
+                                        info!("Trailing zeros in audio chunk, len {}", n);
+                                    }
+                                    AUDIO_FILLED.send(buf).await; // Hand off data to consumer
+                                    close(state, &volume_mgr).unwrap();
+                                    eof = true;
+                                }
+                                Err(_e) => {
+                                    AUDIO_EMPTY.send(buf).await;
+                                }
                             }
-                            AUDIO_FILLED.send(buf).await; // Hand off data to consumer
                         }
-                        Err(_e) => {
-                            AUDIO_EMPTY.send(buf).await;
-                        }
+                    } else {
                     }
-                } else {
+                    if eof {
+                        playback = None;
+                    }
                 }
+            }
+        } else {
+            match select(AUDIO_SD_REQUEST.receive(), SD_REQUEST.receive()).await {
+                Either::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
+                Either::Second(req) => handle_ui_request(req, &volume_mgr).await,
             }
         }
         TRACK_LOADED.store(playback.is_some(), Ordering::Relaxed);
@@ -210,6 +230,7 @@ async fn set_up_sd(
             )
         })
         .unwrap();
+    info!("Finished reconfiguring speed");
     Ok(sdcard)
 }
 

@@ -19,6 +19,7 @@ use esp_hal::Async;
 use esp_hal::i2s::master::I2sTx;
 
 use crate::dac::DacRequest::Start;
+use crate::sd;
 use crate::sd::DirPath;
 use crate::sd::client::*;
 
@@ -212,43 +213,48 @@ impl Player {
                 }
             }
 
-            match select(audio_wait_for_chunk(), DAC_REQUEST.wait()).await {
-                Either::First(Ok(chunk)) => {
-                    let data = chunk.as_slice();
-                    let mut offset = 0;
-                    while offset < data.len() {
-                        match transfer.available() {
-                            Ok(avail) if avail > 0 => {
-                                let take = avail.min(data.len() - offset);
-                                match transfer.push(&data[offset..offset + take]) {
-                                    Ok(_) => offset += take,
-                                    Err(_) => {
-                                        // Known esp-hal bug: available() sticks at 0
-                                        // after a non-aligned push. Recreate the transfer.
-                                        core::mem::drop(transfer);
-                                        transfer = self
-                                            .i2s
-                                            .write_dma_circular(self.tx_buffer)
-                                            .expect("failed to restart I2S DMA transfer");
-                                    }
+            // Sleep time should be either on frame drain time for eash 8k audio chunk
+            // or a little less for a bit of a leaway to catch up or someting
+            // 42666 is chunk time, / 2 just to be safe
+            match select(
+                Timer::after(Duration::from_micros(21332 / 2)),
+                DAC_REQUEST.wait(),
+            )
+            .await
+            {
+                Either::First(()) => {
+                    if let Ok(avail) = transfer.available() {
+                        if avail >= sd::AUDIO_CHUNK_BYTES {
+                            // If everything goes well, we can push new data
+                            let chunk = match audio_wait_for_chunk().await {
+                                Ok(c) => c,
+                                Err(_e) => {
+                                    // Stop playback as error only occus when TRACK_LOADED is false
+                                    return PlayOutcome::Stop;
+                                }
+                            };
+                            let data = chunk.as_slice();
+                            match transfer.push(data) {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    // Known esp-hal bug: available() sticks at 0
+                                    // after a non-aligned push. Recreate the transfer.
+                                    core::mem::drop(transfer);
+                                    transfer = self
+                                        .i2s
+                                        .write_dma_circular(self.tx_buffer)
+                                        .expect("failed to restart I2S DMA transfer");
                                 }
                             }
-                            Ok(_) => Timer::after(Duration::from_millis(1)).await,
-                            Err(_) => {
-                                core::mem::drop(transfer);
-                                transfer = self
-                                    .i2s
-                                    .write_dma_circular(self.tx_buffer)
-                                    .expect("failed to restart I2S DMA transfer");
-                            }
+                            return_audio_chunk(chunk).await;
                         }
+                    } else {
+                        core::mem::drop(transfer);
+                        transfer = self
+                            .i2s
+                            .write_dma_circular(self.tx_buffer)
+                            .expect("failed to restart I2S DMA transfer");
                     }
-                    return_audio_chunk(chunk).await;
-                }
-                Either::First(Err(SdError::AudioEofReached)) => return PlayOutcome::Next,
-                Either::First(Err(_)) => {
-                    DAC_RESPONSE.signal(DacResponse::Error(DacError::UnknownResponse));
-                    return PlayOutcome::Stop;
                 }
                 Either::Second(DacRequest::Pause) => {
                     core::mem::drop(transfer);
