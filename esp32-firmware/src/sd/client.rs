@@ -1,6 +1,7 @@
 // A wrapper module for the sd task which takes care of signaling and awaiting and stuff
 use super::*;
 use embassy_futures::select::{Either, select};
+use embassy_sync::channel::TryReceiveError;
 
 pub enum SdError {
     Generic,
@@ -33,37 +34,23 @@ pub async fn audio_close() -> Result<(), ()> {
     }
 }
 
-pub async fn audio_read_chunk() -> Result<AudioChunk, SdError> {
-    AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
+pub fn audio_try_take() -> Result<AudioChunk, TryReceiveError> {
+    AUDIO_FILLED.try_receive()
+}
 
-    match select(AUDIO_FILLED.receive(), AUDIO_SD_RESPONSE.wait()).await {
-        Either::First(chunk) => Ok(chunk),
-        Either::Second(response) => match response {
-            AudioSdResponse::Eof => Err(SdError::AudioEofReached),
-            AudioSdResponse::Closed => Err(SdError::AudioFileNotOpen),
-            AudioSdResponse::Error => Err(SdError::AudioGeneric),
-            _ => Err(SdError::Generic),
-        },
+pub async fn audio_wait_for_chunk() -> Result<AudioChunk, SdError> {
+    if !TRACK_LOADED.load(Ordering::Relaxed) {
+        return Err(SdError::AudioFileNotOpen);
     }
+    Ok(AUDIO_FILLED.receive().await)
 }
 
 pub async fn return_audio_chunk(chunk: AudioChunk) {
     AUDIO_EMPTY.send(chunk).await;
 }
 
-// non blocking varient for getting chunks needed by DAC
-pub async fn audio_request_chunk() {
-    AUDIO_SD_REQUEST.send(AudioSdRequest::ReadChunk).await;
-}
-
-pub fn audio_poll_chunk() -> Option<Result<AudioChunk, ()>> {
-    if let Ok(chunk) = AUDIO_FILLED.try_receive() {
-        return Some(Ok(chunk));
-    }
-    if AUDIO_SD_RESPONSE.try_take().is_some() {
-        return Some(Err(()));
-    }
-    None
+pub fn audio_is_track_loaded() -> bool {
+    TRACK_LOADED.load(Ordering::Relaxed)
 }
 
 // UI stuff

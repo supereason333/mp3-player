@@ -8,6 +8,8 @@ use ui::*;
 use defmt::*;
 use defmt_rtt as _;
 
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use esp_hal::time::Rate;
 
@@ -18,7 +20,7 @@ use embassy_sync::signal::Signal;
 use embedded_sdmmc::Directory;
 use heapless::Vec as HVec;
 
-use embassy_futures::select::{Either, select};
+use embassy_futures::select::{Either3, select3};
 
 use embedded_sdmmc::{RawDirectory, SdCard, ShortFileName, TimeSource, Timestamp, VolumeManager};
 
@@ -28,8 +30,11 @@ use esp_hal::spi::Mode;
 use esp_hal::spi::master::{Config, SpiDmaBus};
 
 use embassy_time::Delay;
+use embassy_time::{Duration, Timer};
 
 use static_cell::StaticCell;
+
+use crate::dac::client::play;
 
 pub type DirListing = HVec<(ShortFileName, u32, bool), 32>;
 pub type DirPath = HVec<ShortFileName, 16>;
@@ -60,18 +65,16 @@ pub const AUDIO_CHUNK_FRAMES: usize = AUDIO_CHUNK_BYTES / 2;
 static AUDIO_BUF_0: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
 static AUDIO_BUF_1: StaticCell<[u8; AUDIO_CHUNK_BYTES]> = StaticCell::new();
 
-static AUDIO_FILLED: Channel<CriticalSectionRawMutex, AudioChunk, 2> = Channel::new();
-static AUDIO_EMPTY: Channel<CriticalSectionRawMutex, AudioChunk, 2> = Channel::new();
+static AUDIO_FILLED: Channel<CriticalSectionRawMutex, AudioChunk, 4> = Channel::new();
+static AUDIO_EMPTY: Channel<CriticalSectionRawMutex, AudioChunk, 4> = Channel::new();
 
 enum AudioSdRequest {
     Open(DirPath, ShortFileName),
-    ReadChunk,
     Close,
 }
 
 enum AudioSdResponse {
     Opened { data_offset: u32, data_size: u32 }, // offset/size of the PCM data chunk, after header
-    Eof,
     Error,
     Closed,
 }
@@ -81,6 +84,8 @@ static AUDIO_SD_RESPONSE: Signal<CriticalSectionRawMutex, AudioSdResponse> = Sig
 
 static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new();
 static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::new();
+
+static TRACK_LOADED: AtomicBool = AtomicBool::new(false);
 
 /// Code from https://github.com/rp-rs/rp-hal-boards/blob/main/boards/rp-pico/examples/pico_spi_sd_card.rs
 /// A dummy timesource, which is mostly important for creating files.
@@ -109,11 +114,13 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
     let mut volume_mgr = match set_up_sd(spi_device, cs).await {
         Ok(card) => {
             SD_RESPONSE.signal(SdResponse::SetupFinished(Ok(())));
-            Some(VolumeManager::new(card, DummyTimesource::default()))
+            VolumeManager::new(card, DummyTimesource::default())
         }
         Err(_e) => {
             SD_RESPONSE.signal(SdResponse::SetupFinished(Err(())));
-            None
+            loop {
+                Timer::after(Duration::from_secs(100)).await;
+            }
         }
     };
 
@@ -126,22 +133,53 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
     // warn!("[SD] No card override enabled!");
 
     let mut playback: Option<AudioPlaybackState> = None;
+    TRACK_LOADED.store(false, Ordering::Relaxed);
 
-    // DOuble static buffer setup
+    // static buffer setup
     let buf0 = AUDIO_BUF_0.init([0u8; AUDIO_CHUNK_BYTES]);
     let buf1 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
+    let buf2 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
+    let buf3 = AUDIO_BUF_1.init([0u8; AUDIO_CHUNK_BYTES]);
     AUDIO_EMPTY.try_send(buf0).ok();
     AUDIO_EMPTY.try_send(buf1).ok();
+    AUDIO_EMPTY.try_send(buf2).ok();
+    AUDIO_EMPTY.try_send(buf3).ok();
     loop {
-        match (
-            &mut volume_mgr,
-            select(AUDIO_SD_REQUEST.receive(), SD_REQUEST.receive()).await,
-        ) {
-            (Some(vm), Either::First(req)) => handle_audio_request(req, vm, &mut playback).await,
-            (None, Either::First(req)) => empty_handle_audio(req).await,
-            (Some(vm), Either::Second(req)) => handle_ui_request(req, vm).await,
-            (None, Either::Second(req)) => empty_handle_ui(req).await,
+        match select3(
+            AUDIO_SD_REQUEST.receive(),
+            SD_REQUEST.receive(),
+            AUDIO_EMPTY.ready_to_receive(),
+        )
+        .await
+        {
+            Either3::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
+            Either3::Second(req) => handle_ui_request(req, &volume_mgr).await,
+            Either3::Third(()) => {
+                if let Some(state) = &mut playback {
+                    let buf = AUDIO_EMPTY.receive().await; // Since buffer is there, it should recieve instantly
+                    match volume_mgr.read(state.file, buf.as_mut_slice()) {
+                        Ok(0) => {
+                            AUDIO_EMPTY.send(buf).await;
+                            close(state, &volume_mgr).unwrap();
+                            playback = None;
+                        }
+                        Ok(n) => {
+                            // Successful read
+                            if n < AUDIO_CHUNK_BYTES {
+                                buf[n..].fill(0);
+                                info!("Trailing zeros in audio chunk, len {}", n);
+                            }
+                            AUDIO_FILLED.send(buf).await; // Hand off data to consumer
+                        }
+                        Err(_e) => {
+                            AUDIO_EMPTY.send(buf).await;
+                        }
+                    }
+                } else {
+                }
+            }
         }
+        TRACK_LOADED.store(playback.is_some(), Ordering::Relaxed);
     }
 }
 

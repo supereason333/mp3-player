@@ -14,7 +14,6 @@ pub(super) async fn empty_handle_audio(request: AudioSdRequest) {
     match request {
         AudioSdRequest::Close => {}
         AudioSdRequest::Open(_, _) => {}
-        AudioSdRequest::ReadChunk => {}
     }
 }
 
@@ -75,11 +74,45 @@ pub(super) async fn handle_audio_request<
                 Ok(data_size)
             })();
 
+            loop {
+                match AUDIO_FILLED.try_receive() {
+                    Ok(buf) => AUDIO_EMPTY.send(buf).await,
+                    Err(_e) => break,
+                }
+            }
+
             match result {
-                Ok(size) => AUDIO_SD_RESPONSE.signal(AudioSdResponse::Opened {
-                    data_offset: 44,
-                    data_size: size,
-                }),
+                Ok(size) => {
+                    AUDIO_SD_RESPONSE.signal(AudioSdResponse::Opened {
+                        data_offset: 44,
+                        data_size: size,
+                    });
+
+                    while let Ok(buf) = AUDIO_EMPTY.try_receive()
+                        && let Some(state) = playback_state
+                    {
+                        match volume_mgr.read(state.file, buf.as_mut_slice()) {
+                            Ok(0) => {
+                                AUDIO_EMPTY.send(buf).await;
+                                close(state, &volume_mgr).unwrap();
+                                *playback_state = None;
+                                break;
+                            }
+                            Ok(n) => {
+                                // Successful read
+                                if n < AUDIO_CHUNK_BYTES {
+                                    buf[n..].fill(0);
+                                    info!("Trailing zeros in audio chunk, len {}", n);
+                                }
+                                AUDIO_FILLED.send(buf).await; // Hand off data to consumer
+                            }
+                            Err(_e) => {
+                                AUDIO_EMPTY.send(buf).await;
+                                break;
+                            }
+                        }
+                    }
+                }
                 Err(e) => {
                     error!("[SD] audio open failed: {:?}", Debug2Format(&e));
                     AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
@@ -87,44 +120,21 @@ pub(super) async fn handle_audio_request<
             }
         }
         AudioSdRequest::Close => {
-            if let Some(mut state) = playback_state.take() {
-                if let Err(_e) = close(&mut state, volume_mgr) {
-                    // Error
-                    // TODO: Do something useful, propogate back to caller with signal?
-                    // When like I write wrapper module with function wrappers for these signals
+            // Send buffers back
+            loop {
+                match AUDIO_FILLED.try_receive() {
+                    Ok(buf) => AUDIO_EMPTY.send(buf).await,
+                    Err(_e) => break,
                 }
             }
-            AUDIO_SD_RESPONSE.signal(AudioSdResponse::Closed);
-        }
-        AudioSdRequest::ReadChunk => {
-            // Make sure buf is NOT DROPPED
-            // info!("[SD] ReadChunk Recieved");
-            let buf = AUDIO_EMPTY.receive().await; // Wait for a free buffer
-            if let Some(state) = &playback_state {
-                match volume_mgr.read(state.file, buf.as_mut_slice()) {
-                    Ok(0) => {
-                        // Dosent close it, need seperate close on EOF
-                        // let mut state = playback_state.take().unwrap();
-                        // close(&mut state, volume_mgr).unwrap();
-                        AUDIO_EMPTY.send(buf).await;
-                        AUDIO_SD_RESPONSE.signal(AudioSdResponse::Eof);
-                    }
-                    Ok(n) => {
-                        // Successful read
-                        if n < AUDIO_CHUNK_BYTES {
-                            buf[n..].fill(0);
-                            info!("Trailing zeros in audio chunk, len {}", n);
-                        }
-                        AUDIO_FILLED.send(buf).await; // Hand off data to consumer
-                    }
-                    Err(_e) => {
-                        AUDIO_EMPTY.send(buf).await;
-                        AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
-                    }
+
+            if let Some(mut state) = playback_state.take() {
+                if let Err(_e) = close(&mut state, volume_mgr) {
+                    AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
+                } else {
+                    AUDIO_SD_RESPONSE.signal(AudioSdResponse::Closed);
                 }
             } else {
-                // No state
-                AUDIO_EMPTY.send(buf).await; // put back onto empty stack
                 AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
             }
         }

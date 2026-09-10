@@ -76,10 +76,10 @@ pub async fn dac_task(
 ) {
     info!("[DAC] DAC task spawned");
 
-    let mut player = Player::new(i2s_tx, tx_buffer);
-
     DAC_LOADED.store(false, Ordering::Relaxed);
     DAC_PAUSED.store(false, Ordering::Relaxed);
+
+    let mut player = Player::new(i2s_tx, tx_buffer);
 
     loop {
         player.stopped().await;
@@ -212,7 +212,7 @@ impl Player {
                 }
             }
 
-            match select(audio_read_chunk(), DAC_REQUEST.wait()).await {
+            match select(audio_wait_for_chunk(), DAC_REQUEST.wait()).await {
                 Either::First(Ok(chunk)) => {
                     let data = chunk.as_slice();
                     let mut offset = 0;
@@ -233,7 +233,7 @@ impl Player {
                                     }
                                 }
                             }
-                            Ok(_) => Timer::after(Duration::from_millis(10)).await,
+                            Ok(_) => Timer::after(Duration::from_millis(1)).await,
                             Err(_) => {
                                 core::mem::drop(transfer);
                                 transfer = self
