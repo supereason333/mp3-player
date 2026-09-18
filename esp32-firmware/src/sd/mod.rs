@@ -1,3 +1,4 @@
+// sd/mod.rs
 mod audio;
 pub mod client;
 mod ui;
@@ -151,7 +152,9 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
 
     info!("[SD] Finished setting up");
     loop {
-        if playback.is_some() {
+        // info!("TRACK_LOADED    : {}", TRACK_LOADED.load(Ordering::Relaxed));
+        // info!("playback is some: {}", playback.is_some());
+        if playback.is_some() && TRACK_LOADED.load(Ordering::Relaxed) {
             match select3(
                 AUDIO_SD_REQUEST.receive(),
                 SD_REQUEST.receive(),
@@ -162,13 +165,13 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
                 Either3::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
                 Either3::Second(req) => handle_ui_request(req, &volume_mgr).await,
                 Either3::Third(()) => {
+                    // info!("[SD] Filling chunk");
                     let mut eof = false;
                     if let Some(state) = &mut playback {
                         while let Ok(buf) = AUDIO_EMPTY.try_receive() {
                             match volume_mgr.read(state.file, buf.as_mut_slice()) {
                                 Ok(0) => {
                                     AUDIO_EMPTY.send(buf).await;
-                                    close(state, &volume_mgr).unwrap();
                                     eof = true;
                                 }
                                 Ok(n) => {
@@ -176,10 +179,9 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
                                     if n < AUDIO_CHUNK_BYTES {
                                         buf[n..].fill(0);
                                         info!("Trailing zeros in audio chunk, len {}", n);
+                                        eof = true;
                                     }
                                     AUDIO_FILLED.send(buf).await; // Hand off data to consumer
-                                    close(state, &volume_mgr).unwrap();
-                                    eof = true;
                                 }
                                 Err(_e) => {
                                     AUDIO_EMPTY.send(buf).await;
@@ -187,9 +189,17 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
                             }
                         }
                     } else {
+                        TRACK_LOADED.store(false, Ordering::Relaxed);
                     }
                     if eof {
+                        if let Some(mut state) = playback.take() {
+                            if let Err(e) = close(&mut state, &volume_mgr) {
+                                error!("[SD] ERR closing file on EOF {}", Debug2Format(&e));
+                            }
+                        }
+
                         playback = None;
+                        TRACK_LOADED.store(false, Ordering::Relaxed);
                     }
                 }
             }
@@ -199,7 +209,6 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
                 Either::Second(req) => handle_ui_request(req, &volume_mgr).await,
             }
         }
-        TRACK_LOADED.store(playback.is_some(), Ordering::Relaxed);
     }
 }
 

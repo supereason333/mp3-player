@@ -9,7 +9,7 @@
 
 use core::fmt::Write;
 
-use defmt::{error, info, warn};
+use defmt::{Debug2Format, error, info, warn};
 use defmt_rtt as _;
 use esp_backtrace as _;
 use esp_hal::gpio::{Output, OutputConfig};
@@ -220,24 +220,32 @@ async fn main(spawner: Spawner) -> ! {
 
     let dir = sd::client::ui_list_dir(path.clone()).await.unwrap();
     for (name, size, is_dir) in dir.iter() {
-        let mut buf: heapless::String<16> = heapless::String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
-        if is_dir.clone() {
-            let _ = core::write!(buf, "{}/", name);
-        } else {
-            let _ = core::write!(buf, "{}", name);
-        }
-        // buf is heapless::String<16>, which derefs to &str:
-        let name_str: &str = &buf;
-        info!("File: {}", name_str);
-
         if name.extension() == b"WAV" {
-            dac::client::start_playback(path, name.clone())
-                .await
-                .unwrap();
-            break;
+            let mut buf: heapless::String<16> = heapless::String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
+            if is_dir.clone() {
+                let _ = core::write!(buf, "{}/", name);
+            } else {
+                let _ = core::write!(buf, "{}", name);
+            }
+            // buf is heapless::String<16>, which derefs to &str:
+            let name_str: &str = &buf;
+            info!("File: {}", name_str);
+
+            match dac::client::queue_add(path.clone(), name.clone()).await {
+                Ok(()) => {}
+                Err(e) => error!("Queue add error {}", Debug2Format(&e)),
+            }
+
+            // dac::client::start_playback(path, name.clone())
+            //     .await
+            //     .unwrap();
+            // info!("Playback started!");
         }
     }
-    info!("Playback started");
+    match dac::client::start_playback_queue().await {
+        Ok(()) => {}
+        Err(e) => error!("Start playback queue error {}", Debug2Format(&e)),
+    }
 
     loop {
         Timer::after(Duration::from_secs(100)).await;

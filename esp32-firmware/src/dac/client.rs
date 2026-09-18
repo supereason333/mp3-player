@@ -19,6 +19,30 @@ pub async fn start_playback(path: DirPath, name: ShortFileName) -> Result<(), Da
     }
 }
 
+pub async fn start_playback_queue() -> Result<(), DacError> {
+    DAC_REQUEST.signal(DacRequest::StartQueue);
+    match DAC_RESPONSE.wait().await {
+        DacResponse::Opened => Ok(()),
+        DacResponse::Error(e) => {
+            error!("[DAC] Could not start playback: {}", e);
+            Err(e)
+        }
+        _ => {
+            error!("[DAC] Unknown response");
+            Err(DacError::UnknownResponse)
+        }
+    }
+}
+
+pub async fn queue_add(path: DirPath, name: ShortFileName) -> Result<(), DacError> {
+    DAC_REQUEST.signal(DacRequest::QueueAdd(path.clone(), name.clone()));
+    match DAC_RESPONSE.wait().await {
+        DacResponse::AddedToQueue => Ok(()),
+        DacResponse::Error(e) => Err(e),
+        _ => Err(DacError::UnknownResponse),
+    }
+}
+
 pub async fn end_playback() -> Result<(), DacError> {
     DAC_REQUEST.signal(DacRequest::Stop);
     match DAC_RESPONSE.wait().await {

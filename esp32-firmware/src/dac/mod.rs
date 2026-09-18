@@ -1,4 +1,4 @@
-// dac.rs
+// dac/mod.rs
 pub mod client;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -33,6 +33,8 @@ static DAC_PAUSED: AtomicBool = AtomicBool::new(false);
 
 enum DacRequest {
     Start(DirPath, ShortFileName),
+    StartQueue,
+    QueueAdd(DirPath, ShortFileName),
     Play,
     Pause,
     Stop,
@@ -50,6 +52,7 @@ enum DacResponse {
     Error(DacError),
     TrackInfo(Result<(DirPath, ShortFileName, i32), i32>),
     Status { loaded: bool, paused: bool },
+    AddedToQueue,
 }
 
 #[derive(defmt::Format, Debug)]
@@ -59,6 +62,8 @@ pub enum DacError {
     AlreadyPlaying,
     UnknownResponse,
     Unimplimented,
+    QueueEmpty,
+    QueueFull,
 }
 
 pub const SAMPLE_RATE: u32 = 48_000;
@@ -134,6 +139,23 @@ impl Player {
                     DAC_LOADED.store(true, Ordering::Relaxed);
                     return;
                 }
+                DacRequest::StartQueue => {
+                    let (path, name) = match self.queue.pop_front() {
+                        Some((path, name)) => (path, name),
+                        None => {
+                            info!("[DAC] Start queue but queue empty");
+                            DAC_RESPONSE.signal(DacResponse::Error(DacError::QueueEmpty));
+                            continue;
+                        }
+                    };
+                    self.current = Some((path, name));
+                    DAC_LOADED.store(true, Ordering::Relaxed);
+                    return;
+                }
+                DacRequest::QueueAdd(path, name) => match self.queue.push_back((path, name)) {
+                    Ok(()) => DAC_RESPONSE.signal(DacResponse::AddedToQueue),
+                    Err(_n) => DAC_RESPONSE.signal(DacResponse::Error(DacError::QueueFull)),
+                },
                 DacRequest::GetTrackInfo => {
                     DAC_RESPONSE.signal(DacResponse::TrackInfo(Err(self.tracknumber)));
                 }
@@ -160,30 +182,40 @@ impl Player {
     async fn playing(&mut self) {
         loop {
             let Some((path, name)) = self.current.clone() else {
+                DAC_RESPONSE.signal(DacResponse::Error(DacError::NoAudioLoaded));
+                DAC_LOADED.store(false, Ordering::Relaxed);
+                info!("[DAC] playing but current is none");
                 return;
             };
 
             if audio_open(path.clone(), name.clone()).await.is_err() {
                 DAC_RESPONSE.signal(DacResponse::Error(DacError::CantOpenFile));
+                info!("[DAC] SD audio open error");
                 return;
             }
             DAC_RESPONSE.signal(DacResponse::Opened);
             self.tracknumber += 1;
-
+            info!("[DAC] Track number {}", self.tracknumber);
             match self.play_loaded().await {
                 PlayOutcome::Stop => {
                     audio_close().await.ok();
                     DAC_RESPONSE.signal(DacResponse::Closed);
+                    info!("[DAC] Play outcome: Stop");
                     return;
                 }
                 PlayOutcome::Next => {
                     audio_close().await.ok();
+                    info!("[DAC] Play outcome: Next");
                     match self.queue.pop_front() {
                         Some((p, n)) => self.current = Some((p, n)),
-                        None => return,
+                        None => {
+                            info!("[DAC] Empty queue, stopping");
+                            return;
+                        }
                     }
                 }
                 PlayOutcome::SwitchTo(p, n) => {
+                    info!("[DAC] Play outcome: Switch to");
                     audio_close().await.ok();
                     self.current = Some((p, n));
                 }
@@ -192,6 +224,7 @@ impl Player {
     }
 
     async fn play_loaded(&mut self) -> PlayOutcome {
+        info!("[DAC] Playing loaded");
         let mut transfer = self
             .i2s
             .write_dma_circular(self.tx_buffer)
@@ -223,6 +256,9 @@ impl Player {
             .await
             {
                 Either::First(()) => {
+                    if !audio_is_track_loaded() {
+                        return PlayOutcome::Next;
+                    }
                     if let Ok(avail) = transfer.available() {
                         if avail >= sd::AUDIO_CHUNK_BYTES {
                             // If everything goes well, we can push new data
@@ -230,6 +266,7 @@ impl Player {
                                 Ok(c) => c,
                                 Err(_e) => {
                                     // Stop playback as error only occus when TRACK_LOADED is false
+                                    info!("[DAC] Audio wait for chunk is err");
                                     return PlayOutcome::Stop;
                                 }
                             };
@@ -273,6 +310,15 @@ impl Player {
                 }
                 Either::Second(DacRequest::Stop) => return PlayOutcome::Stop,
                 Either::Second(DacRequest::Start(p, n)) => return PlayOutcome::SwitchTo(p, n),
+                Either::Second(DacRequest::StartQueue) => {
+                    DAC_RESPONSE.signal(DacResponse::Error(DacError::AlreadyPlaying));
+                }
+                Either::Second(DacRequest::QueueAdd(path, name)) => {
+                    match self.queue.push_back((path, name)) {
+                        Ok(()) => DAC_RESPONSE.signal(DacResponse::AddedToQueue),
+                        Err(_n) => DAC_RESPONSE.signal(DacResponse::Error(DacError::QueueFull)),
+                    }
+                }
                 Either::Second(DacRequest::Play) => {
                     DAC_RESPONSE.signal(DacResponse::Error(DacError::AlreadyPlaying));
                 }
@@ -312,6 +358,13 @@ impl Player {
                     }
                     DacRequest::Stop => return PauseOutcome::Stop,
                     DacRequest::Start(p, n) => return PauseOutcome::SwitchTo(p, n),
+                    DacRequest::StartQueue => {
+                        DAC_RESPONSE.signal(DacResponse::Error(DacError::AlreadyPlaying));
+                    }
+                    DacRequest::QueueAdd(path, name) => match self.queue.push_back((path, name)) {
+                        Ok(()) => DAC_RESPONSE.signal(DacResponse::AddedToQueue),
+                        Err(_n) => DAC_RESPONSE.signal(DacResponse::Error(DacError::QueueFull)),
+                    },
                     DacRequest::Pause => {
                         DAC_RESPONSE.signal(DacResponse::Error(DacError::UnknownResponse));
                     }

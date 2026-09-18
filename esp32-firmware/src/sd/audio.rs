@@ -1,3 +1,4 @@
+// sd/audio.rs
 use defmt::*;
 use defmt_rtt as _;
 
@@ -60,11 +61,14 @@ pub(super) async fn handle_audio_request<
                 // Clear it before if it was accdently left unclosed
                 if let Some(mut state) = playback_state.take() {
                     match close(&mut state, volume_mgr) {
-                        Ok(()) => {}                                // yay
-                        Err(embedded_sdmmc::Error::BadHandle) => {} // Prob already closed
-                        Err(_e) => {} // Otehr error i prob dont care about
+                        Ok(()) => {} // yay
+                        Err(embedded_sdmmc::Error::BadHandle) => {
+                            error!("[SD] Audio open error BadHandle");
+                        } // Prob already closed
+                        Err(e) => {
+                            error!("[SD] Audio open error {}", Debug2Format(&e));
+                        } // Otehr error i prob dont care about
                     }
-                    // it should be dropped even if it errors because i said so
                 }
 
                 *playback_state = Some(AudioPlaybackState {
@@ -74,6 +78,7 @@ pub(super) async fn handle_audio_request<
                 Ok(data_size)
             })();
 
+            // Empty out filled buffer, send to empty buffer
             loop {
                 match AUDIO_FILLED.try_receive() {
                     Ok(buf) => AUDIO_EMPTY.send(buf).await,
@@ -83,11 +88,7 @@ pub(super) async fn handle_audio_request<
 
             match result {
                 Ok(size) => {
-                    AUDIO_SD_RESPONSE.signal(AudioSdResponse::Opened {
-                        data_offset: 44,
-                        data_size: size,
-                    });
-
+                    // Fill buffers
                     while let Ok(buf) = AUDIO_EMPTY.try_receive()
                         && let Some(state) = playback_state
                     {
@@ -112,10 +113,16 @@ pub(super) async fn handle_audio_request<
                             }
                         }
                     }
+                    AUDIO_SD_RESPONSE.signal(AudioSdResponse::Opened {
+                        data_offset: 44,
+                        data_size: size,
+                    });
+                    TRACK_LOADED.store(true, Ordering::Relaxed);
                 }
                 Err(e) => {
                     error!("[SD] audio open failed: {:?}", Debug2Format(&e));
                     AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);
+                    TRACK_LOADED.store(false, Ordering::Relaxed);
                 }
             }
         }
@@ -127,7 +134,7 @@ pub(super) async fn handle_audio_request<
                     Err(_e) => break,
                 }
             }
-
+            TRACK_LOADED.store(false, Ordering::Relaxed);
             if let Some(mut state) = playback_state.take() {
                 if let Err(_e) = close(&mut state, volume_mgr) {
                     AUDIO_SD_RESPONSE.signal(AudioSdResponse::Error);

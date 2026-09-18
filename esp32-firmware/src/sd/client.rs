@@ -1,3 +1,5 @@
+// sd/client.rs
+
 // A wrapper module for the sd task which takes care of signaling and awaiting and stuff
 use super::*;
 use embassy_futures::select::{Either, select};
@@ -21,7 +23,10 @@ pub async fn audio_open(path: DirPath, name: ShortFileName) -> Result<(u32, u32)
         AudioSdResponse::Opened {
             data_offset,
             data_size,
-        } => Ok((data_offset, data_size)),
+        } => {
+            info!("[SD] Audio opened");
+            Ok((data_offset, data_size))
+        }
         _ => Err(()),
     }
 }
@@ -29,8 +34,14 @@ pub async fn audio_open(path: DirPath, name: ShortFileName) -> Result<(u32, u32)
 pub async fn audio_close() -> Result<(), ()> {
     AUDIO_SD_REQUEST.send(AudioSdRequest::Close).await;
     match AUDIO_SD_RESPONSE.wait().await {
-        AudioSdResponse::Closed => Ok(()),
-        _ => Err(()),
+        AudioSdResponse::Closed => {
+            info!("[SD] Audio closed");
+            Ok(())
+        }
+        _ => {
+            info!("[SD] Audio closed with error");
+            Err(())
+        }
     }
 }
 

@@ -19,7 +19,7 @@ use esp_hal::i2s::master::{Config as I2sConfig, DataFormat, I2s};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 
-use esp32_mp3_player::others::ROUNDABOUT_8MB;
+use esp32_mp3_player::others::{ROUNDABOUT_2MB, ROUNDABOUT_8MB};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -41,7 +41,7 @@ async fn main(spawner: Spawner) -> ! {
     let _ = spawner;
 
     // Parse the embedded WAV first — need sample rate before configuring I2S.
-    let (sample_rate, bits, channels, pcm) = parse_wav(ROUNDABOUT_8MB);
+    let (sample_rate, bits, channels, pcm) = parse_wav(ROUNDABOUT_2MB);
     info!(
         "WAV: {}Hz, {}bit, {}ch, {} bytes",
         sample_rate,
