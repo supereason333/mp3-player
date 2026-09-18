@@ -51,9 +51,9 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     // I2S setup — pins from your DAC wiring
-    let lrck = peripherals.GPIO14;
-    let din = peripherals.GPIO13;
-    let bck = peripherals.GPIO12;
+    let lrck = peripherals.GPIO21;
+    let din = peripherals.GPIO47;
+    let bck = peripherals.GPIO48;
 
     let (mut i2s_tx_buffer, i2s_tx_descriptors, _, _) = dma_buffers!(4 * 4092, 0);
 

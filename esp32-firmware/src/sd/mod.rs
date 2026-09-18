@@ -234,7 +234,7 @@ async fn set_up_sd(
             info!("[SD] reconfiguring SPI speed");
             spi_dev.bus_mut().apply_config(
                 &Config::default()
-                    .with_frequency(Rate::from_mhz(24))
+                    .with_frequency(Rate::from_mhz(12))
                     .with_mode(Mode::_0),
             )
         })

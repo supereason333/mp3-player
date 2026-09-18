@@ -20,6 +20,10 @@ use esp_hal::clock::CpuClock;
 use esp_hal::i2s::master::Channels;
 use esp_hal::timer::timg::TimerGroup;
 
+use esp_hal::system::Stack;
+use esp_rtos::embassy::Executor;
+use static_cell::ConstStaticCell;
+
 use esp_hal::{
     dma::{DmaRxBuf, DmaTxBuf},
     dma_buffers,
@@ -38,6 +42,7 @@ use embedded_graphics::image::Image;
 use embedded_graphics::prelude::{Point, RgbColor};
 use tinybmp::{Bmp, ParseError};
 
+use esp32_mp3_player::decoder;
 use esp32_mp3_player::display;
 use esp32_mp3_player::input::input_task;
 use esp32_mp3_player::sd::sd_task;
@@ -46,6 +51,9 @@ use esp32_mp3_player::{dac, sd};
 
 pub static BOOT_SPLASH_BMP: &[u8] = include_bytes!("../assets/boot-splash.bmp");
 pub static NO_SD_SPLASH: &[u8] = include_bytes!("../assets/no-sd.bmp");
+
+static APP_CORE_STACK: ConstStaticCell<Stack<8192>> = ConstStaticCell::new(Stack::new());
+static EXECUTOR_CORE1: static_cell::StaticCell<Executor> = static_cell::StaticCell::new();
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -211,41 +219,55 @@ async fn main(spawner: Spawner) -> ! {
     info!("Spawing UI task");
     spawner.spawn(ui::ui_task(disp).unwrap());
 
+    // Start the decoder in second core
+    esp_rtos::start_second_core(
+        peripherals.CPU_CTRL,
+        sw_interrupt.software_interrupt1,
+        APP_CORE_STACK.take(),
+        move || {
+            let executor = EXECUTOR_CORE1.init(Executor::new());
+            executor.run(|spawner| {
+                spawner.spawn(decoder::decoder_task().unwrap());
+            });
+        },
+    );
+
     info!("Finished setting up!");
 
-    let path: sd::DirPath = heapless::Vec::new();
-    // path.push(embedded_sdmmc::ShortFileName::create_from_str("a").unwrap());
+    // DAC queue and play test
+    // let path: sd::DirPath = heapless::Vec::new();
+    // // path.push(embedded_sdmmc::ShortFileName::create_from_str("a").unwrap());
 
-    Timer::after(Duration::from_secs(1)).await;
+    // Timer::after(Duration::from_secs(1)).await;
 
-    let dir = sd::client::ui_list_dir(path.clone()).await.unwrap();
-    for (name, size, is_dir) in dir.iter() {
-        if name.extension() == b"WAV" {
-            let mut buf: heapless::String<16> = heapless::String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
-            if is_dir.clone() {
-                let _ = core::write!(buf, "{}/", name);
-            } else {
-                let _ = core::write!(buf, "{}", name);
-            }
-            // buf is heapless::String<16>, which derefs to &str:
-            let name_str: &str = &buf;
-            info!("File: {}", name_str);
+    // let dir = sd::client::ui_list_dir(path.clone()).await.unwrap();
+    // for (name, size, is_dir) in dir.iter() {
+    //     if name.extension() == b"WAV" {
+    //         let mut buf: heapless::String<16> = heapless::String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
+    //         if is_dir.clone() {
+    //             let _ = core::write!(buf, "{}/", name);
+    //         } else {
+    //             let _ = core::write!(buf, "{}", name);
+    //         }
+    //         // buf is heapless::String<16>, which derefs to &str:
+    //         let name_str: &str = &buf;
+    //         info!("File: {}", name_str);
 
-            match dac::client::queue_add(path.clone(), name.clone()).await {
-                Ok(()) => {}
-                Err(e) => error!("Queue add error {}", Debug2Format(&e)),
-            }
+    //         match dac::client::queue_add(path.clone(), name.clone()).await {
+    //             Ok(()) => {}
+    //             Err(e) => error!("Queue add error {}", Debug2Format(&e)),
+    //         }
 
-            // dac::client::start_playback(path, name.clone())
-            //     .await
-            //     .unwrap();
-            // info!("Playback started!");
-        }
-    }
-    match dac::client::start_playback_queue().await {
-        Ok(()) => {}
-        Err(e) => error!("Start playback queue error {}", Debug2Format(&e)),
-    }
+    //         // dac::client::start_playback(path, name.clone())
+    //         //     .await
+    //         //     .unwrap();
+    //         // info!("Playback started!");
+    //     }
+    // }
+    // match dac::client::start_playback_queue().await {
+    //     Ok(()) => {}
+    //     Err(e) => error!("Start playback queue error {}", Debug2Format(&e)),
+    // }
 
     loop {
         Timer::after(Duration::from_secs(100)).await;
