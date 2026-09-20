@@ -1,22 +1,28 @@
 // sd/mod.rs
 mod audio;
 pub mod client;
+mod mp3parse;
 mod ui;
+mod wavparse;
 
 use audio::*;
+use heapless::spsc::Producer;
 use ui::*;
 
 use defmt::*;
 use defmt_rtt as _;
 
 use core::sync::atomic::AtomicBool;
+use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering;
 use embedded_hal_bus::spi::{ExclusiveDevice, NoDelay};
 use esp_hal::time::Rate;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
+use embassy_sync::watch::Watch;
 
 use embedded_sdmmc::Directory;
 use heapless::Vec as HVec;
@@ -35,7 +41,7 @@ use embassy_time::{Duration, Timer};
 
 use static_cell::StaticCell;
 
-use crate::dac::client::play;
+use crate::sd::mp3parse::Id3v2Tag;
 
 pub type DirListing = HVec<(ShortFileName, u32, bool), 32>;
 pub type DirPath = HVec<ShortFileName, 16>;
@@ -77,7 +83,7 @@ enum AudioSdRequest {
 }
 
 enum AudioSdResponse {
-    Opened { data_offset: u32, data_size: u32 }, // offset/size of the PCM data chunk, after header
+    Opened,
     Error,
     Closed,
 }
@@ -88,7 +94,14 @@ static AUDIO_SD_RESPONSE: Signal<CriticalSectionRawMutex, AudioSdResponse> = Sig
 static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new();
 static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::new();
 
+/// If track is loaded and ready to be played
 static TRACK_LOADED: AtomicBool = AtomicBool::new(false);
+/// UI metadata like name and artist
+static TRACK_METADATA: Watch<CriticalSectionRawMutex, Option<TrackMetadata>, 2> = Watch::new();
+/// Playback importnat data like sample rate
+static TRACK_AUDIO_INFO: Mutex<CriticalSectionRawMutex, Option<AudioInfo>> = Mutex::new(None);
+/// The loaded file's format
+static TRACK_FORMAT: AtomicU8 = AtomicU8::new(AudioType::MP3 as u8);
 
 /// Code from https://github.com/rp-rs/rp-hal-boards/blob/main/boards/rp-pico/examples/pico_spi_sd_card.rs
 /// A dummy timesource, which is mostly important for creating files.
@@ -111,10 +124,14 @@ impl TimeSource for DummyTimesource {
 }
 
 #[embassy_executor::task]
-pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>) -> ! {
+pub async fn sd_task(
+    spi_device: SpiDmaBus<'static, Async>,
+    cs: Output<'static>,
+    mut ring_producer: Producer<'static, u8>,
+) -> ! {
     info!("[SD] SD task spawned");
 
-    let mut volume_mgr = match set_up_sd(spi_device, cs).await {
+    let volume_mgr = match set_up_sd(spi_device, cs).await {
         Ok(card) => {
             SD_RESPONSE.signal(SdResponse::SetupFinished(Ok(())));
             info!("[SD] Got volume mgr");
@@ -154,8 +171,14 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
     loop {
         // info!("TRACK_LOADED    : {}", TRACK_LOADED.load(Ordering::Relaxed));
         // info!("playback is some: {}", playback.is_some());
-        if playback.is_some() && TRACK_LOADED.load(Ordering::Relaxed) {
-            match select3(
+
+        match (
+            &playback,
+            TRACK_LOADED.load(Ordering::Relaxed),
+            AudioType::from_u8(TRACK_FORMAT.load(Ordering::Relaxed)),
+        ) {
+            // Playing WAV, fill PCM into buffer directly
+            (Some(state), true, AudioType::WAV) => match select3(
                 AUDIO_SD_REQUEST.receive(),
                 SD_REQUEST.receive(),
                 AUDIO_EMPTY.ready_to_receive(),
@@ -167,29 +190,26 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
                 Either3::Third(()) => {
                     // info!("[SD] Filling chunk");
                     let mut eof = false;
-                    if let Some(state) = &mut playback {
-                        while let Ok(buf) = AUDIO_EMPTY.try_receive() {
-                            match volume_mgr.read(state.file, buf.as_mut_slice()) {
-                                Ok(0) => {
-                                    AUDIO_EMPTY.send(buf).await;
+                    while let Ok(buf) = AUDIO_EMPTY.try_receive() {
+                        match volume_mgr.read(state.file, buf.as_mut_slice()) {
+                            Ok(0) => {
+                                AUDIO_EMPTY.send(buf).await;
+                                eof = true;
+                            }
+                            Ok(n) => {
+                                // Successful read
+                                if n < AUDIO_CHUNK_BYTES {
+                                    buf[n..].fill(0);
+                                    info!("Trailing zeros in audio chunk, len {}", n);
                                     eof = true;
                                 }
-                                Ok(n) => {
-                                    // Successful read
-                                    if n < AUDIO_CHUNK_BYTES {
-                                        buf[n..].fill(0);
-                                        info!("Trailing zeros in audio chunk, len {}", n);
-                                        eof = true;
-                                    }
-                                    AUDIO_FILLED.send(buf).await; // Hand off data to consumer
-                                }
-                                Err(_e) => {
-                                    AUDIO_EMPTY.send(buf).await;
-                                }
+                                AUDIO_FILLED.send(buf).await; // Hand off data to consumer
+                            }
+                            Err(_e) => {
+                                AUDIO_EMPTY.send(buf).await;
+                                eof = true;
                             }
                         }
-                    } else {
-                        TRACK_LOADED.store(false, Ordering::Relaxed);
                     }
                     if eof {
                         if let Some(mut state) = playback.take() {
@@ -202,12 +222,60 @@ pub async fn sd_task(spi_device: SpiDmaBus<'static, Async>, cs: Output<'static>)
                         TRACK_LOADED.store(false, Ordering::Relaxed);
                     }
                 }
-            }
-        } else {
-            match select(AUDIO_SD_REQUEST.receive(), SD_REQUEST.receive()).await {
+            },
+            // Playing MP3, feed the decoder ring buffer
+            (Some(state), true, AudioType::MP3) => match select3(
+                AUDIO_SD_REQUEST.receive(),
+                SD_REQUEST.receive(),
+                Timer::after(Duration::from_millis(13)),
+                // 1152 samples per frame to poll the ring buffer
+                // / 44100 hz * 1000
+                // = 26 ms
+                // Half that for some headroom = 13 ms
+            )
+            .await
+            {
+                Either3::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
+                Either3::Second(req) => handle_ui_request(req, &volume_mgr).await,
+                Either3::Third(()) => {
+                    let mut eof = false;
+                    let free = ring_producer.capacity() - ring_producer.len();
+                    let chunks = free / 256;
+                    'outer: for _ in 0..chunks {
+                        let mut buf = [0u8; 256];
+                        match volume_mgr.read(state.file, &mut buf) {
+                            Ok(0) => eof = true,
+                            Ok(n) => {
+                                if n < 256 {
+                                    eof = true;
+                                }
+                                for b in 0..n {
+                                    if ring_producer.enqueue(buf[b]).is_err() {
+                                        break 'outer;
+                                    }
+                                }
+                            }
+                            Err(_e) => eof = true,
+                        }
+                        if eof {
+                            if let Some(mut state) = playback.take() {
+                                if let Err(e) = close(&mut state, &volume_mgr) {
+                                    error!("[SD] ERR closing file on EOF {}", Debug2Format(&e));
+                                }
+                            }
+
+                            playback = None;
+                            TRACK_LOADED.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                }
+            },
+            // Else, just watch for requests
+            _ => match select(AUDIO_SD_REQUEST.receive(), SD_REQUEST.receive()).await {
                 Either::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
                 Either::Second(req) => handle_ui_request(req, &volume_mgr).await,
-            }
+            },
         }
     }
 }
@@ -234,7 +302,7 @@ async fn set_up_sd(
             info!("[SD] reconfiguring SPI speed");
             spi_dev.bus_mut().apply_config(
                 &Config::default()
-                    .with_frequency(Rate::from_mhz(12))
+                    .with_frequency(Rate::from_mhz(24))
                     .with_mode(Mode::_0),
             )
         })

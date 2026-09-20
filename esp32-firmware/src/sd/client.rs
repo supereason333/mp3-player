@@ -2,7 +2,6 @@
 
 // A wrapper module for the sd task which takes care of signaling and awaiting and stuff
 use super::*;
-use embassy_futures::select::{Either, select};
 use embassy_sync::channel::TryReceiveError;
 
 pub enum SdError {
@@ -15,17 +14,14 @@ pub enum SdError {
 
 // Audio stuff
 
-pub async fn audio_open(path: DirPath, name: ShortFileName) -> Result<(u32, u32), ()> {
+pub async fn audio_open(path: DirPath, name: ShortFileName) -> Result<(), ()> {
     AUDIO_SD_REQUEST
         .send(AudioSdRequest::Open(path, name))
         .await;
     match AUDIO_SD_RESPONSE.wait().await {
-        AudioSdResponse::Opened {
-            data_offset,
-            data_size,
-        } => {
+        AudioSdResponse::Opened => {
             info!("[SD] Audio opened");
-            Ok((data_offset, data_size))
+            Ok(())
         }
         _ => Err(()),
     }
@@ -57,7 +53,19 @@ pub async fn audio_wait_for_chunk() -> Result<AudioChunk, SdError> {
 }
 
 pub async fn return_audio_chunk(chunk: AudioChunk) {
-    AUDIO_EMPTY.send(chunk).await;
+    AUDIO_EMPTY.send(chunk).await
+}
+
+pub async fn audio_send_filled(chunk: AudioChunk) {
+    AUDIO_FILLED.send(chunk).await
+}
+
+pub fn audio_try_take_empty() -> Result<AudioChunk, TryReceiveError> {
+    AUDIO_EMPTY.try_receive()
+}
+
+pub async fn audio_wait_for_empty_chunk() -> AudioChunk {
+    AUDIO_EMPTY.receive().await
 }
 
 /// Basicaly is track open, if not you prob want to open
