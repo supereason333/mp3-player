@@ -103,7 +103,8 @@ pub(super) async fn handle_audio_request<
                             Err(Mp3ParseError::NoTag) => track_metadata = None,
                             Err(e) => {
                                 error!("[SD] MP3 tag parse error {}", Debug2Format(&e));
-                                return Err(embedded_sdmmc::Error::EndOfFile);
+                                track_metadata = None; // Tag is optional, dosent stop playback
+                                // return Err(embedded_sdmmc::Error::EndOfFile);
                             }
                         }
                         match mp3_parse_info(&file) {
@@ -112,7 +113,7 @@ pub(super) async fn handle_audio_request<
                             }
                             Err(e) => {
                                 error!("[SD] MP3 info parse error {}", Debug2Format(&e));
-                                return Err(embedded_sdmmc::Error::EndOfFile);
+                                return Err(embedded_sdmmc::Error::EndOfFile); // Bad parse prob means MP3 dosent work
                             }
                         }
                     }
@@ -123,14 +124,14 @@ pub(super) async fn handle_audio_request<
                         }
                         Err(e) => {
                             error!("[SD] WAV parse error {}", Debug2Format(&e));
-                            return Err(embedded_sdmmc::Error::EndOfFile);
+                            return Err(embedded_sdmmc::Error::EndOfFile); // Bad parse means no settings give up for now
                         }
                     },
                 }
                 let sender = TRACK_METADATA.sender();
                 sender.send(track_metadata);
                 let mut guard = TRACK_AUDIO_INFO.lock().await;
-                *guard = track_info;
+                *guard = track_info; // Authough track info is there, the parser is kinda shit so its not gonna be used
                 TRACK_LOADED.store(true, Ordering::Relaxed);
                 TRACK_FORMAT.store(audio_type as u8, Ordering::Relaxed);
 

@@ -19,7 +19,7 @@ pub struct WavHeader {
 /// Parses a canonical 44-byte WAV header (RIFF/WAVE, single `fmt ` chunk
 /// immediately followed by `data`, no extra chunks in between). Leaves the
 /// file cursor positioned at the start of the PCM audio data on success.
-pub fn parse_wav_header<D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
+pub(super) fn parse_wav_header<D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
     file: &File<D, T, DIRS, FILES, VOLS>,
 ) -> Result<WavHeader, WavParseError>
 where
@@ -27,6 +27,8 @@ where
     T: embedded_sdmmc::TimeSource,
 {
     let mut header = [0u8; 44];
+    file.seek_from_start(0)
+        .map_err(|_| WavParseError::ReadError)?;
     let n = file
         .read(&mut header)
         .map_err(|_| WavParseError::ReadError)?;

@@ -250,7 +250,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let dir = sd::client::ui_list_dir(path.clone()).await.unwrap();
     for (name, _size, is_dir) in dir.iter() {
-        if name.extension() == b"MP3" {
+        if name.extension() == b"MP3" || name.extension() == b"WAV" {
             let mut buf: heapless::String<16> = heapless::String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
             if is_dir.clone() {
                 let _ = core::write!(buf, "{}/", name);
@@ -278,7 +278,9 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     loop {
-        Timer::after(Duration::from_secs(100)).await;
+        Timer::after(Duration::from_secs(5)).await;
+        info!("SKIP");
+        dac::client::skip();
     }
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.1.0/examples
 }

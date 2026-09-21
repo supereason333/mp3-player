@@ -1,9 +1,9 @@
 // sd/mod.rs
-mod audio;
+pub mod audio;
 pub mod client;
-mod mp3parse;
+pub mod mp3parse;
 mod ui;
-mod wavparse;
+pub mod wavparse;
 
 use audio::*;
 use heapless::spsc::Producer;
@@ -95,13 +95,13 @@ static SD_REQUEST: Channel<CriticalSectionRawMutex, SdRequest, 4> = Channel::new
 static SD_RESPONSE: Signal<CriticalSectionRawMutex, SdResponse> = Signal::new();
 
 /// If track is loaded and ready to be played
-static TRACK_LOADED: AtomicBool = AtomicBool::new(false);
+pub static TRACK_LOADED: AtomicBool = AtomicBool::new(false);
 /// UI metadata like name and artist
-static TRACK_METADATA: Watch<CriticalSectionRawMutex, Option<TrackMetadata>, 2> = Watch::new();
+pub static TRACK_METADATA: Watch<CriticalSectionRawMutex, Option<TrackMetadata>, 2> = Watch::new();
 /// Playback importnat data like sample rate
-static TRACK_AUDIO_INFO: Mutex<CriticalSectionRawMutex, Option<AudioInfo>> = Mutex::new(None);
+pub static TRACK_AUDIO_INFO: Mutex<CriticalSectionRawMutex, Option<AudioInfo>> = Mutex::new(None);
 /// The loaded file's format
-static TRACK_FORMAT: AtomicU8 = AtomicU8::new(AudioType::MP3 as u8);
+pub static TRACK_FORMAT: AtomicU8 = AtomicU8::new(AudioType::MP3 as u8);
 
 /// Code from https://github.com/rp-rs/rp-hal-boards/blob/main/boards/rp-pico/examples/pico_spi_sd_card.rs
 /// A dummy timesource, which is mostly important for creating files.
@@ -220,6 +220,8 @@ pub async fn sd_task(
 
                         playback = None;
                         TRACK_LOADED.store(false, Ordering::Relaxed);
+                        let sender = TRACK_METADATA.sender();
+                        sender.send(None);
                     }
                 }
             },
@@ -266,6 +268,8 @@ pub async fn sd_task(
 
                             playback = None;
                             TRACK_LOADED.store(false, Ordering::Relaxed);
+                            let sender = TRACK_METADATA.sender();
+                            sender.send(None);
                             break;
                         }
                     }

@@ -1,6 +1,10 @@
+use core::cell::RefCell;
+use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embedded_sdmmc::File;
 use heapless::String as HString;
-use nanomp3::{Decoder, MAX_SAMPLES_PER_FRAME};
+use nanomp3::{Channels, Decoder, MAX_SAMPLES_PER_FRAME};
+use static_cell::StaticCell;
 
 const MAX_FIELD_LEN: usize = 64;
 const PROBE_BUF_LEN: usize = 4096;
@@ -11,6 +15,8 @@ pub enum Mp3ParseError {
     FileTooShort,
     ReadError,
     NoFrameFound,
+    BuffersNotInit,
+    InvalidHeader,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -24,6 +30,7 @@ pub struct Id3v2Tag {
 #[derive(Clone)]
 pub struct Mp3Data {
     pub sample_rate: u32,
+    pub stereo: bool,
 }
 
 /// Decode a 28-bit syncsafe integer (7 usable bits per byte, MSB always 0).
@@ -270,6 +277,7 @@ where
     Ok(tag)
 }
 
+/// parses frame information, expects a file at the start of a frame
 pub fn mp3_parse_info<D, T, const DIRS: usize, const FILES: usize, const VOLS: usize>(
     file: &File<D, T, DIRS, FILES, VOLS>,
 ) -> Result<Mp3Data, Mp3ParseError>
@@ -277,28 +285,75 @@ where
     D: embedded_sdmmc::BlockDevice,
     T: embedded_sdmmc::TimeSource,
 {
-    // Remember exactly where the first frame starts, to seek back to later.
     let frame_start = file.offset();
 
-    let mut probe = [0u8; PROBE_BUF_LEN];
-    let n = file
-        .read(&mut probe)
-        .map_err(|_| Mp3ParseError::ReadError)?;
+    let mut header = [0u8; 4];
+    match file.read(&mut header) {
+        Ok(n) => {
+            if n != 4 {
+                file.seek_from_start(frame_start)
+                    .map_err(|_| Mp3ParseError::ReadError)?;
+                return Err(Mp3ParseError::FileTooShort);
+            }
+        }
+        Err(_e) => {
+            file.seek_from_start(frame_start)
+                .map_err(|_| Mp3ParseError::ReadError)?;
+            return Err(Mp3ParseError::ReadError);
+        }
+    }
 
-    // let mut decoder = Decoder::new();
-    // let mut pcm_scratch = [0f32; MAX_SAMPLES_PER_FRAME];
-    // let (_consumed, frame_info) = decoder.decode(&probe[..n], &mut pcm_scratch);
+    let result = (|| -> Result<Mp3Data, Mp3ParseError> {
+        // Frame sync: 11 bits all set — byte0 fully 0xFF, top 3 bits of byte1 set.
+        if header[0] != 0xFF || (header[1] & 0xE0) != 0xE0 {
+            return Err(Mp3ParseError::InvalidHeader);
+        }
 
-    // Seek back regardless of outcome, so the file cursor ends up in a
-    // known/predictable place either way rather than wherever decode()
-    // happened to leave the probe read.
+        // Bits 20-19 of the header (byte1, bits 4-3): MPEG version.
+        // 00 = MPEG2.5, 01 = reserved, 10 = MPEG2, 11 = MPEG1.
+        let version_bits = (header[1] >> 3) & 0x3;
+
+        // Bits 18-17 (byte1, bits 2-1): layer. 01 = Layer III (what MP3 means).
+        let layer_bits = (header[1] >> 1) & 0x3;
+        if layer_bits != 0b01 {
+            return Err(Mp3ParseError::InvalidHeader);
+        }
+
+        // Bits 11-10 (byte2, bits 3-2): sample rate index. Index 3 is reserved
+        // in every version's table.
+        let sample_rate_index = (header[2] >> 2) & 0x3;
+        if sample_rate_index == 0b11 {
+            return Err(Mp3ParseError::InvalidHeader);
+        }
+
+        let sample_rate: u32 = match (version_bits, sample_rate_index) {
+            (0b11, 0) => 44_100, // MPEG1
+            (0b11, 1) => 48_000,
+            (0b11, 2) => 32_000,
+            (0b10, 0) => 22_050, // MPEG2
+            (0b10, 1) => 24_000,
+            (0b10, 2) => 16_000,
+            (0b00, 0) => 11_025, // MPEG2.5
+            (0b00, 1) => 12_000,
+            (0b00, 2) => 8_000,
+            _ => return Err(Mp3ParseError::InvalidHeader), // version 01 is reserved
+        };
+
+        // Bits 7-6 of byte3: channel mode. 11 = mono, anything else = stereo
+        // (stereo / joint stereo / dual channel all carry two channels).
+        let channel_mode = (header[3] >> 6) & 0x3;
+        let stereo = channel_mode != 0b11;
+
+        Ok(Mp3Data {
+            sample_rate,
+            stereo,
+        })
+    })();
+
+    // Regardless of outcome, leave the file exactly where it started —
+    // this function only inspects the frame, it doesn't consume it.
     file.seek_from_start(frame_start)
         .map_err(|_| Mp3ParseError::ReadError)?;
 
-    // let info = frame_info.ok_or(Mp3ParseError::NoFrameFound)?;
-
-    Ok(Mp3Data {
-        // sample_rate: info.sample_rate,
-        sample_rate: 0,
-    })
+    result
 }

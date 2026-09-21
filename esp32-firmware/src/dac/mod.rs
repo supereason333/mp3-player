@@ -6,6 +6,9 @@ use defmt::*;
 use defmt_rtt as _;
 use embassy_futures::select::Either;
 use embassy_futures::select::select;
+use esp_hal::i2s::master::Channels;
+use esp_hal::i2s::master::UnitConfig;
+use esp_hal::time::Rate;
 use heapless::Deque;
 use static_cell::StaticCell;
 
@@ -17,10 +20,12 @@ use embedded_sdmmc::ShortFileName;
 
 use esp_hal::Async;
 use esp_hal::i2s::master::I2sTx;
+use esp_hal::i2s::master::{Config as I2sConfig, DataFormat, I2s};
 
 use crate::dac::DacRequest::Start;
 use crate::sd;
 use crate::sd::DirPath;
+use crate::sd::TRACK_AUDIO_INFO;
 use crate::sd::client::*;
 
 static DAC_REQUEST: Signal<CriticalSectionRawMutex, DacRequest> = Signal::new();
@@ -42,6 +47,7 @@ enum DacRequest {
     GetQueue,
     ClearQueue,
     GetStatus,
+    Skip,
 }
 
 enum DacResponse {
@@ -113,6 +119,7 @@ enum PauseOutcome {
     Resume,
     Stop,
     SwitchTo(DirPath, ShortFileName),
+    Next,
 }
 
 impl Player {
@@ -171,7 +178,7 @@ impl Player {
                 DacRequest::GetQueue => {
                     // TODO: no DacResponse variant carries queue contents yet.
                 }
-                DacRequest::Play | DacRequest::Pause | DacRequest::Stop => {
+                DacRequest::Play | DacRequest::Pause | DacRequest::Stop | DacRequest::Skip => {
                     DAC_RESPONSE.signal(DacResponse::Error(DacError::NoAudioLoaded));
                 }
             }
@@ -225,6 +232,71 @@ impl Player {
 
     async fn play_loaded(&mut self) -> PlayOutcome {
         info!("[DAC] Playing loaded");
+
+        // Because parsers kinda shit atm, not gonna use header data for the config
+        // Just gonna assume sample rate and stuff, make sure to input correctly formatted data
+        // let i2s_config: UnitConfig;
+
+        // let guard = TRACK_AUDIO_INFO.lock().await;
+        // if let Some(info) = &*guard {
+        //     match info {
+        //         sd::audio::AudioInfo::MP3(data) => {
+        //             if data.stereo {
+        //                 i2s_config = UnitConfig::new_tdm_philips()
+        //                     .with_channels(Channels::STEREO)
+        //                     .with_sample_rate(Rate::from_hz(data.sample_rate))
+        //                     .with_data_format(DataFormat::Data16Channel16);
+        //             } else {
+        //                 i2s_config = UnitConfig::new_tdm_philips()
+        //                     .with_channels(Channels::MONO)
+        //                     .with_sample_rate(Rate::from_hz(data.sample_rate))
+        //                     .with_data_format(DataFormat::Data16Channel16);
+        //             }
+        //         }
+        //         sd::audio::AudioInfo::WAV(data) => match data.channels {
+        //             1 => {
+        //                 info!("1Sample rate: {}", data.sample_rate);
+        //                 i2s_config = UnitConfig::new_tdm_philips()
+        //                     .with_channels(Channels::MONO)
+        //                     .with_sample_rate(Rate::from_hz(data.sample_rate))
+        //                     .with_data_format(DataFormat::Data16Channel16)
+        //             }
+        //             2 => {
+        //                 info!("2Sample rate: {}", data.sample_rate);
+        //                 i2s_config = UnitConfig::new_tdm_philips()
+        //                     .with_channels(Channels::STEREO)
+        //                     .with_sample_rate(Rate::from_hz(data.sample_rate))
+        //                     .with_data_format(DataFormat::Data16Channel16);
+        //             }
+        //             _ => {
+        //                 info!("{}Sample rate: {}", data.channels, data.sample_rate);
+        //                 i2s_config = UnitConfig::new_tdm_philips()
+        //                     .with_channels(Channels::STEREO)
+        //                     .with_sample_rate(Rate::from_hz(data.sample_rate))
+        //                     .with_data_format(DataFormat::Data16Channel16);
+        //             }
+        //         },
+        //     }
+        // } else {
+        //     i2s_config = UnitConfig::new_tdm_philips()
+        //         .with_channels(Channels::STEREO)
+        //         .with_sample_rate(Rate::from_khz(48))
+        //         .with_data_format(DataFormat::Data16Channel16);
+        // }
+
+        // if let Err(e) = self.i2s.apply_config(&i2s_config) {
+        //     error!("[DAC] I2S apply config error {}", Debug2Format(&e));
+        //     // Apply some default value instead
+        //     self.i2s
+        //         .apply_config(
+        //             &UnitConfig::new_tdm_philips()
+        //                 .with_channels(Channels::STEREO)
+        //                 .with_sample_rate(Rate::from_khz(48))
+        //                 .with_data_format(DataFormat::Data16Channel16),
+        //         )
+        //         .ok();
+        // }
+
         let mut transfer = self
             .i2s
             .write_dma_circular(self.tx_buffer)
@@ -243,6 +315,7 @@ impl Player {
                     }
                     PauseOutcome::Stop => return PlayOutcome::Stop,
                     PauseOutcome::SwitchTo(p, n) => return PlayOutcome::SwitchTo(p, n),
+                    PauseOutcome::Next => return PlayOutcome::Next,
                 }
             }
 
@@ -306,6 +379,7 @@ impl Player {
                         }
                         PauseOutcome::Stop => return PlayOutcome::Stop,
                         PauseOutcome::SwitchTo(p, n) => return PlayOutcome::SwitchTo(p, n),
+                        PauseOutcome::Next => return PlayOutcome::Next,
                     }
                 }
                 Either::Second(DacRequest::Stop) => return PlayOutcome::Stop,
@@ -335,6 +409,9 @@ impl Player {
                 Either::Second(DacRequest::ClearQueue) => self.queue.clear(),
                 Either::Second(DacRequest::GetQueue) => {
                     // TODO: no DacResponse variant carries queue contents yet.
+                }
+                Either::Second(DacRequest::Skip) => {
+                    return PlayOutcome::Next;
                 }
             }
         }
@@ -382,20 +459,10 @@ impl Player {
                     DacRequest::GetQueue => {
                         // TODO: no DacResponse variant carries queue contents yet.
                     }
+                    DacRequest::Skip => return PauseOutcome::Next,
                 },
                 Either::Second(_) => {}
             }
         }
-    }
-}
-
-fn pcm_bytes_to_i2s_bytes(
-    bytes: &[u8; crate::sd::AUDIO_CHUNK_BYTES],
-    out: &mut [u8; I2S_CHUNK_BYTES],
-) {
-    for (i, chunk) in bytes.chunks_exact(2).enumerate() {
-        let out_idx = i * 4;
-        out[out_idx..out_idx + 2].copy_from_slice(chunk);
-        out[out_idx + 2..out_idx + 4].copy_from_slice(chunk);
     }
 }

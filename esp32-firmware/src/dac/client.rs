@@ -88,6 +88,10 @@ pub fn play_atomic() {
     DAC_PAUSED.store(false, Ordering::Relaxed);
 }
 
+pub fn skip() {
+    DAC_REQUEST.signal(DacRequest::Skip);
+}
+
 /// Does the DAC have anything to play (playing or paused)
 pub fn has_audio_loaded() -> bool {
     DAC_LOADED.load(Ordering::Relaxed)

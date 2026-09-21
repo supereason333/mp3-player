@@ -42,7 +42,7 @@ pub async fn decoder_task(mut consumer: Consumer<'static, u8>) {
             info!("[DECODER] New track — draining stale ring data");
             while consumer.dequeue().is_some() {}
             len = 0;
-            decoder = Decoder::new();
+            // decoder = Decoder::new();
         }
         was_active = active;
 
