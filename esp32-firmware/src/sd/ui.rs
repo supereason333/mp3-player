@@ -4,20 +4,6 @@ use embedded_sdmmc::{VolumeIdx, VolumeManager};
 
 use super::*;
 
-// Basicaly if SD card does not exist it just returns empty shit
-pub(super) async fn empty_handle_ui(request: SdRequest) {
-    match request {
-        SdRequest::ListDir(_) => {
-            let empty: DirListing = HVec::new();
-            SD_RESPONSE.signal(SdResponse::DirListing(empty));
-        }
-        SdRequest::ReadFile(_, _) => {
-            let empty: HVec<u8, 512> = HVec::new();
-            SD_RESPONSE.signal(SdResponse::FileContents(empty));
-        }
-    }
-}
-
 pub(super) async fn handle_ui_request<
     'a,
     D,
@@ -33,34 +19,54 @@ pub(super) async fn handle_ui_request<
     T: embedded_sdmmc::TimeSource,
 {
     match request {
-        SdRequest::ListDir(path) => {
-            let mut entries: DirListing = HVec::new();
+        SdRequest::ListDir(path, from_idx) => {
+            let mut guard_entries = DIRECTORY_LIST.lock().await;
+            guard_entries.drain(..);
+
+            // NOTE: when playing audio and ui opening, it sdeems like it opens two volimes and dies
             let volume = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
             let root = volume.open_root_dir().unwrap();
             let directory = open_dir_path(volume_mgr, root, &path).unwrap();
 
+            let mut added = 0;
+            let mut offset = 0;
+            let mut more = false;
             directory
                 .iterate_dir(|entry| {
+                    if added == 32 {
+                        return;
+                    }
+                    if added > 32 {
+                        more = true;
+                        return;
+                    }
+                    if offset < from_idx {
+                        offset += 1;
+                        return;
+                    }
+
                     if entry.attributes.is_system()
                         || entry.attributes.is_volume()
-                        || entry.name.base_name()[0] == b'_'
-                        || (entry.name.base_name().len() == 1 && entry.name.base_name()[0] == b'.')
+                        || entry.attributes.is_hidden()
+                    // || entry.attributes.is_archive()
+                    {
+                        return;
+                    }
+                    if entry.name.base_name()[..1] == *b"." || entry.name.base_name()[..1] == *b"_"
                     {
                         return;
                     }
 
-                    let _ = entries.push((
-                        entry.name.clone(),
-                        entry.size,
-                        entry.attributes.is_directory(),
-                    ));
+                    let _ = guard_entries.push(entry.clone());
+
+                    added += 1;
                 })
                 .unwrap();
 
             directory.close().unwrap();
             volume.close().unwrap();
 
-            SD_RESPONSE.signal(SdResponse::DirListing(entries));
+            SD_RESPONSE.signal(SdResponse::DirLoaded(!more));
         }
         SdRequest::ReadFile(_path, _name) => {
             let buf: HVec<u8, 512> = HVec::new();

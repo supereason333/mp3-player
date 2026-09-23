@@ -6,6 +6,7 @@ mod ui;
 pub mod wavparse;
 
 use audio::*;
+use embedded_sdmmc::DirEntry;
 use heapless::spsc::Producer;
 use ui::*;
 
@@ -43,7 +44,6 @@ use static_cell::StaticCell;
 
 use crate::sd::mp3parse::Id3v2Tag;
 
-pub type DirListing = HVec<(ShortFileName, u32, bool), 32>;
 pub type DirPath = HVec<ShortFileName, 16>;
 pub type AudioChunk = &'static mut [u8; AUDIO_CHUNK_BYTES];
 
@@ -54,15 +54,20 @@ type SdError = embedded_sdmmc::Error<<SdBlockDevice as embedded_sdmmc::BlockDevi
 // UI stuff
 // Simple requests
 enum SdRequest {
-    ListDir(DirPath),
+    ListDir(DirPath, usize),
     ReadFile(DirPath, ShortFileName), // whole-file read, capped size, for text/hex viewers
 }
 
 enum SdResponse {
-    DirListing(DirListing),
+    /// When the contents of DIRECTORY_LIST is ready, bool is more after
+    DirLoaded(bool),
     FileContents(HVec<u8, 512>),
     SetupFinished(Result<(), ()>),
 }
+
+/// Stores the directory list which is queried
+pub static DIRECTORY_LIST: Mutex<CriticalSectionRawMutex, HVec<DirEntry, 16>> =
+    Mutex::new(HVec::new());
 
 // AUdio stuff
 pub const AUDIO_CHUNK_BYTES: usize = 1024 * 4;
@@ -385,21 +390,25 @@ where
     let mut current_guard: Option<Directory<'_, D, T, DIRS, FILES, VOLS>> = None;
 
     for segment in path {
-        // if this fails, `current_guard` (the previous intermediate, if any) drops here
-        // automatically and closes itself. `start` is untouched since it's never guarded.
         let next_raw = volume_mgr.open_dir(current, segment)?;
         let next_guard = next_raw.to_directory(volume_mgr);
 
-        // close the previous intermediate now that we've moved past it
-        if let Some(dir) = current_guard.take() {
-            dir.close().unwrap();
+        match current_guard.take() {
+            Some(dir) => {
+                // `dir` wraps the same handle as `current` — closing it
+                // here is sufficient, no separate close_dir(current) needed.
+                dir.close().unwrap();
+            }
+            None => {
+                // First iteration only: `current` (== start) has no guard,
+                // so it needs an explicit close of its own.
+                volume_mgr.close_dir(current).unwrap();
+            }
         }
 
-        volume_mgr.close_dir(current).unwrap();
         current = next_raw;
         current_guard = Some(next_guard);
     }
 
-    // success: extract the raw handle from the final guard instead of letting it close
     Ok(current_guard.unwrap().to_raw_directory())
 }

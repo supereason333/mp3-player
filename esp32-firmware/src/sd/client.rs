@@ -75,10 +75,10 @@ pub fn audio_is_track_loaded() -> bool {
 
 // UI stuff
 
-pub async fn ui_list_dir(path: DirPath) -> Result<DirListing, ()> {
-    SD_REQUEST.send(SdRequest::ListDir(path)).await;
+pub async fn ui_list_dir(path: DirPath, offset: usize) -> Result<bool, ()> {
+    SD_REQUEST.send(SdRequest::ListDir(path, offset)).await;
     match SD_RESPONSE.wait().await {
-        SdResponse::DirListing(listing) => Ok(listing),
+        SdResponse::DirLoaded(more) => Ok(more),
         _ => Err(()),
     }
 }

@@ -243,44 +243,44 @@ async fn main(spawner: Spawner) -> ! {
     info!("Finished setting up!");
 
     // DAC queue and play test
-    let path: sd::DirPath = heapless::Vec::new();
-    // path.push(embedded_sdmmc::ShortFileName::create_from_str("a").unwrap());
+    // let path: sd::DirPath = heapless::Vec::new();
+    // // path.push(embedded_sdmmc::ShortFileName::create_from_str("a").unwrap());
 
-    Timer::after(Duration::from_secs(1)).await;
+    // Timer::after(Duration::from_secs(1)).await;
 
-    let dir = sd::client::ui_list_dir(path.clone()).await.unwrap();
-    for (name, _size, is_dir) in dir.iter() {
-        if name.extension() == b"MP3" || name.extension() == b"WAV" {
-            let mut buf: heapless::String<16> = heapless::String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
-            if is_dir.clone() {
-                let _ = core::write!(buf, "{}/", name);
-            } else {
-                let _ = core::write!(buf, "{}", name);
-            }
-            // buf is heapless::String<16>, which derefs to &str:
-            let name_str: &str = &buf;
-            info!("File: {}", name_str);
+    // let dir = sd::client::ui_list_dir(path.clone()).await.unwrap();
+    // for (name, _size, is_dir) in dir.iter() {
+    //     if name.extension() == b"MP3" || name.extension() == b"WAV" {
+    //         let mut buf: heapless::String<16> = heapless::String::new(); // 8.3 + dot + null-ish headroom = "XXXXXXXX.XXX" = 12 chars, 16 is safe
+    //         if is_dir.clone() {
+    //             let _ = core::write!(buf, "{}/", name);
+    //         } else {
+    //             let _ = core::write!(buf, "{}", name);
+    //         }
+    //         // buf is heapless::String<16>, which derefs to &str:
+    //         let name_str: &str = &buf;
+    //         info!("File: {}", name_str);
 
-            match dac::client::queue_add(path.clone(), name.clone()).await {
-                Ok(()) => {}
-                Err(e) => error!("Queue add error {}", Debug2Format(&e)),
-            }
+    //         match dac::client::queue_add(path.clone(), name.clone()).await {
+    //             Ok(()) => {}
+    //             Err(e) => error!("Queue add error {}", Debug2Format(&e)),
+    //         }
 
-            // dac::client::start_playback(path, name.clone())
-            //     .await
-            //     .unwrap();
-            // info!("Playback started!");
-        }
-    }
-    match dac::client::start_playback_queue().await {
-        Ok(()) => {}
-        Err(e) => error!("Start playback queue error {}", Debug2Format(&e)),
-    }
+    //         // dac::client::start_playback(path, name.clone())
+    //         //     .await
+    //         //     .unwrap();
+    //         // info!("Playback started!");
+    //     }
+    // }
+    // match dac::client::start_playback_queue().await {
+    //     Ok(()) => {}
+    //     Err(e) => error!("Start playback queue error {}", Debug2Format(&e)),
+    // }
 
     loop {
         Timer::after(Duration::from_secs(5)).await;
-        info!("SKIP");
-        dac::client::skip();
+        // info!("SKIP");
+        // dac::client::skip();
     }
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.1.0/examples
 }
