@@ -1,9 +1,9 @@
 use heapless::Vec as HVec;
 
-use embedded_sdmmc::{VolumeIdx, VolumeManager};
+use embedded_sdmmc::{Volume, VolumeIdx, VolumeManager};
 
 use super::*;
-
+//larpus maximus
 pub(super) async fn handle_ui_request<
     'a,
     D,
@@ -14,6 +14,7 @@ pub(super) async fn handle_ui_request<
 >(
     request: SdRequest,
     volume_mgr: &'a VolumeManager<D, T, DIRS, FILES, VOLS>,
+    volume: &Volume<'a, D, T, DIRS, FILES, VOLS>,
 ) where
     D: embedded_sdmmc::BlockDevice,
     T: embedded_sdmmc::TimeSource,
@@ -23,8 +24,6 @@ pub(super) async fn handle_ui_request<
             let mut guard_entries = DIRECTORY_LIST.lock().await;
             guard_entries.drain(..);
 
-            // NOTE: when playing audio and ui opening, it sdeems like it opens two volimes and dies
-            let volume = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
             let root = volume.open_root_dir().unwrap();
             let directory = open_dir_path(volume_mgr, root, &path).unwrap();
 
@@ -64,7 +63,6 @@ pub(super) async fn handle_ui_request<
                 .unwrap();
 
             directory.close().unwrap();
-            volume.close().unwrap();
 
             SD_RESPONSE.signal(SdResponse::DirLoaded(!more));
         }

@@ -7,6 +7,7 @@ pub mod wavparse;
 
 use audio::*;
 use embedded_sdmmc::DirEntry;
+use embedded_sdmmc::VolumeIdx;
 use heapless::spsc::Producer;
 use ui::*;
 
@@ -149,6 +150,7 @@ pub async fn sd_task(
             }
         }
     };
+    let volume = volume_mgr.open_volume(VolumeIdx(0)).unwrap();
 
     // let mut volume_mgr: Option<
     //     VolumeManager<
@@ -190,8 +192,10 @@ pub async fn sd_task(
             )
             .await
             {
-                Either3::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
-                Either3::Second(req) => handle_ui_request(req, &volume_mgr).await,
+                Either3::First(req) => {
+                    handle_audio_request(req, &volume_mgr, &mut playback, &volume).await
+                }
+                Either3::Second(req) => handle_ui_request(req, &volume_mgr, &volume).await,
                 Either3::Third(()) => {
                     // info!("[SD] Filling chunk");
                     let mut eof = false;
@@ -242,8 +246,10 @@ pub async fn sd_task(
             )
             .await
             {
-                Either3::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
-                Either3::Second(req) => handle_ui_request(req, &volume_mgr).await,
+                Either3::First(req) => {
+                    handle_audio_request(req, &volume_mgr, &mut playback, &volume).await
+                }
+                Either3::Second(req) => handle_ui_request(req, &volume_mgr, &volume).await,
                 Either3::Third(()) => {
                     let mut eof = false;
                     let free = ring_producer.capacity() - ring_producer.len();
@@ -282,8 +288,10 @@ pub async fn sd_task(
             },
             // Else, just watch for requests
             _ => match select(AUDIO_SD_REQUEST.receive(), SD_REQUEST.receive()).await {
-                Either::First(req) => handle_audio_request(req, &volume_mgr, &mut playback).await,
-                Either::Second(req) => handle_ui_request(req, &volume_mgr).await,
+                Either::First(req) => {
+                    handle_audio_request(req, &volume_mgr, &mut playback, &volume).await
+                }
+                Either::Second(req) => handle_ui_request(req, &volume_mgr, &volume).await,
             },
         }
     }
@@ -329,17 +337,11 @@ where
     T: embedded_sdmmc::TimeSource,
 {
     let file_result = volume_mgr.close_file(state.file);
-    let volume_result = volume_mgr.close_volume(state.volume);
 
     if let Err(e) = &file_result {
         error!("[SD] failed to close file: {:?}", Debug2Format(e));
     }
-    if let Err(e) = &volume_result {
-        error!("[SD] failed to close volume: {:?}", Debug2Format(e));
-    }
 
-    // surface the first error to the caller, if either failed
-    volume_result?;
     file_result?;
     Ok(())
 }

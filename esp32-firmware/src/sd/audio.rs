@@ -2,7 +2,7 @@
 use defmt::*;
 use defmt_rtt as _;
 
-use embedded_sdmmc::{RawFile, RawVolume, VolumeIdx, VolumeManager};
+use embedded_sdmmc::{RawFile, RawVolume, Volume, VolumeIdx, VolumeManager};
 
 use crate::{
     decoder,
@@ -46,7 +46,6 @@ pub enum AudioInfo {
 }
 
 pub struct AudioPlaybackState {
-    pub volume: RawVolume,
     pub file: RawFile,
 }
 
@@ -61,6 +60,7 @@ pub(super) async fn handle_audio_request<
     request: AudioSdRequest,
     volume_mgr: &'a VolumeManager<D, T, DIRS, FILES, VOLS>,
     playback_state: &mut Option<AudioPlaybackState>,
+    volume: &Volume<'a, D, T, DIRS, FILES, VOLS>,
 ) where
     D: embedded_sdmmc::BlockDevice,
     T: embedded_sdmmc::TimeSource,
@@ -78,11 +78,7 @@ pub(super) async fn handle_audio_request<
             };
 
             let result = (async || -> Result<(), SdError> {
-                let volume = volume_mgr.open_raw_volume(VolumeIdx(0)).unwrap();
-                let root = volume_mgr.open_root_dir(volume).unwrap(); // TODO: HAndle these errors!
-
-                let volume = volume.to_volume(volume_mgr);
-                let root = root.to_directory(volume_mgr);
+                let root = volume.open_root_dir().unwrap(); // Handle erors!!!!
 
                 // This is the new working directory
                 let dir = open_dir_path(&volume_mgr, root, &path).unwrap();
@@ -149,7 +145,6 @@ pub(super) async fn handle_audio_request<
                 }
 
                 *playback_state = Some(AudioPlaybackState {
-                    volume: volume.to_raw_volume(),
                     file: file.to_raw_file(),
                 });
                 Ok(())
