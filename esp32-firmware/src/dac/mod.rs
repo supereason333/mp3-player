@@ -6,9 +6,6 @@ use defmt::*;
 use defmt_rtt as _;
 use embassy_futures::select::Either;
 use embassy_futures::select::select;
-use esp_hal::i2s::master::Channels;
-use esp_hal::i2s::master::UnitConfig;
-use esp_hal::time::Rate;
 use heapless::Deque;
 use static_cell::StaticCell;
 
@@ -20,12 +17,9 @@ use embedded_sdmmc::ShortFileName;
 
 use esp_hal::Async;
 use esp_hal::i2s::master::I2sTx;
-use esp_hal::i2s::master::{Config as I2sConfig, DataFormat, I2s};
 
-use crate::dac::DacRequest::Start;
 use crate::sd;
 use crate::sd::DirPath;
-use crate::sd::TRACK_AUDIO_INFO;
 use crate::sd::client::*;
 
 static DAC_REQUEST: Signal<CriticalSectionRawMutex, DacRequest> = Signal::new();

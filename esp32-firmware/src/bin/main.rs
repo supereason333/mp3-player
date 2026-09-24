@@ -39,8 +39,8 @@ use esp_hal::{
 use embedded_graphics::Drawable;
 use embedded_graphics::framebuffer::Framebuffer;
 use embedded_graphics::image::Image;
-use embedded_graphics::prelude::{Point, RgbColor};
-use tinybmp::{Bmp, ParseError};
+use embedded_graphics::prelude::Point;
+use tinybmp::Bmp;
 
 use esp32_mp3_player::decoder;
 use esp32_mp3_player::display;
@@ -83,7 +83,7 @@ async fn main(spawner: Spawner) -> ! {
     info!("Embassy initialized!");
 
     // Set up Display SPI
-    let blk = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
+    let _blk = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
     let cs = Output::new(peripherals.GPIO47, Level::High, OutputConfig::default());
     let dc = Output::new(peripherals.GPIO48, Level::High, OutputConfig::default());
     let rst = Output::new(peripherals.GPIO38, Level::High, OutputConfig::default());

@@ -1,13 +1,7 @@
-use core::cell::RefCell;
-use embassy_sync::blocking_mutex::Mutex;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embedded_sdmmc::File;
 use heapless::String as HString;
-use nanomp3::{Channels, Decoder, MAX_SAMPLES_PER_FRAME};
-use static_cell::StaticCell;
 
 const MAX_FIELD_LEN: usize = 64;
-const PROBE_BUF_LEN: usize = 4096;
 
 #[derive(Debug)]
 pub enum Mp3ParseError {

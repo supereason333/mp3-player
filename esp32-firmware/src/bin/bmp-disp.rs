@@ -35,7 +35,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
     reason = "it's not unusual to allocate larger buffers etc. in main"
 )]
 #[esp_rtos::main]
-async fn main(spawner: Spawner) -> ! {
+async fn main(_spawner: Spawner) -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
@@ -44,7 +44,7 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
     info!("Embassy initialized!");
 
-    let blk = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
+    let _blk = Output::new(peripherals.GPIO21, Level::High, OutputConfig::default());
     let cs = Output::new(peripherals.GPIO47, Level::High, OutputConfig::default());
     let dc = Output::new(peripherals.GPIO48, Level::High, OutputConfig::default());
     let rst = Output::new(peripherals.GPIO38, Level::High, OutputConfig::default());

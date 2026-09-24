@@ -1,4 +1,4 @@
-use embedded_sdmmc::{File, RawFile, VolumeManager};
+use embedded_sdmmc::File;
 
 #[derive(Debug)]
 pub enum WavParseError {

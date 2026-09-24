@@ -1,6 +1,6 @@
 use heapless::Vec as HVec;
 
-use embedded_sdmmc::{Volume, VolumeIdx, VolumeManager};
+use embedded_sdmmc::{Volume, VolumeManager};
 
 use super::*;
 //larpus maximus

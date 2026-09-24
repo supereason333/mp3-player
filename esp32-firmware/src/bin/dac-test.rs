@@ -19,7 +19,7 @@ use esp_hal::i2s::master::{Config as I2sConfig, DataFormat, I2s};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 
-use esp32_mp3_player::others::{ROUNDABOUT_2MB, ROUNDABOUT_8MB};
+use esp32_mp3_player::others::ROUNDABOUT_2MB;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 

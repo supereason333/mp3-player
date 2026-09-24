@@ -24,13 +24,11 @@ use embassy_time::Duration;
 use embassy_time::Timer;
 
 use crate::dac;
-use crate::dac::client::*;
 use crate::display::*;
 use crate::input;
 use crate::input::NavEvent;
 use crate::sd;
 use crate::sd::DirPath;
-use crate::ui::Screens::Browser;
 use assets::*;
 
 #[derive(defmt::Format)]

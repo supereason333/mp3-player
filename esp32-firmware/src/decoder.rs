@@ -7,7 +7,6 @@ use embassy_time::{Duration, Timer};
 use heapless::spsc::Consumer;
 use nanomp3::{Decoder, MAX_SAMPLES_PER_FRAME};
 
-use crate::sd::AUDIO_CHUNK_BYTES;
 use crate::sd::client::{audio_send_filled, audio_wait_for_empty_chunk};
 
 /// Controls whether the decoder is actively pulling/decoding.

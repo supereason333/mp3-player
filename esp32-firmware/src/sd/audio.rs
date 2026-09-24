@@ -2,7 +2,7 @@
 use defmt::*;
 use defmt_rtt as _;
 
-use embedded_sdmmc::{RawFile, RawVolume, Volume, VolumeIdx, VolumeManager};
+use embedded_sdmmc::{RawFile, Volume, VolumeManager};
 
 use crate::{
     decoder,
